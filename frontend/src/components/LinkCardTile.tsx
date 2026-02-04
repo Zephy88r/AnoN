@@ -1,14 +1,14 @@
 import {
   LinkIcon,
-  ClipboardDocumentIcon,
   XMarkIcon,
   CheckBadgeIcon,
   ClockIcon,
 } from "@heroicons/react/24/outline";
+import CopyButton from "./CopyButton";
 
 export type LinkStatus = "active" | "used" | "revoked" | "expired";
 
-interface LinkCardProps {
+interface LinkCardTileProps {
   fromMe: boolean;
   code: string;
   expiresIn: string;
@@ -22,7 +22,7 @@ interface LinkCardProps {
 const focusRing =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-green-400 dark:focus-visible:ring-offset-black";
 
-export default function LinkCard({
+export default function LinkCardTile({
   fromMe,
   code,
   expiresIn,
@@ -31,7 +31,7 @@ export default function LinkCard({
   status,
   meta,
   onRevoke,
-}: LinkCardProps) {
+}: LinkCardTileProps) {
   const align = fromMe ? "justify-end" : "justify-start";
 
   const isActive = status === "active";
@@ -59,9 +59,7 @@ export default function LinkCard({
 
   return (
     <div className={`flex ${align}`}>
-      <div
-        className={`max-w-[80%] rounded-2xl px-3 py-3 text-sm border ${container}`}
-      >
+      <div className={`max-w-[80%] rounded-2xl px-3 py-3 text-sm border ${container}`}>
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -76,9 +74,7 @@ export default function LinkCard({
             </div>
           </div>
 
-          <span
-            className={`px-2 py-1 rounded-full text-xs font-mono border ${badgeStyle}`}
-          >
+          <span className={`px-2 py-1 rounded-full text-xs font-mono border ${badgeStyle}`}>
             {badgeText}
           </span>
         </div>
@@ -98,11 +94,7 @@ export default function LinkCard({
 
           {meta && (
             <div className="flex items-center gap-1 text-xs font-mono text-slate-600 dark:text-green-300/60">
-              {isUsed ? (
-                <CheckBadgeIcon className="h-4 w-4" />
-              ) : (
-                <ClockIcon className="h-4 w-4" />
-              )}
+              {isUsed ? <CheckBadgeIcon className="h-4 w-4" /> : <ClockIcon className="h-4 w-4" />}
               <span>{meta}</span>
             </div>
           )}
@@ -110,23 +102,11 @@ export default function LinkCard({
 
         {/* Actions */}
         <div className="mt-3 flex items-center justify-end gap-2">
-          <button
-            disabled={!isActive}
-            onClick={() => navigator.clipboard?.writeText(code)}
-            className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 font-mono text-xs border
-              ${
-                isActive
-                  ? "border-emerald-500/25 dark:border-green-500/25 bg-emerald-500/10 dark:bg-green-500/10 text-slate-800 dark:text-green-200 hover:bg-emerald-500/15 dark:hover:bg-green-500/15"
-                  : "border-emerald-500/10 dark:border-green-500/10 text-slate-400 dark:text-green-400/40 cursor-not-allowed"
-              }
-              ${focusRing}`}
-          >
-            <ClipboardDocumentIcon className="h-4 w-4" />
-            Copy
-          </button>
+          <CopyButton value={code} disabled={!isActive} size="sm" />
 
           {fromMe && isActive && onRevoke && (
             <button
+              type="button"
               onClick={onRevoke}
               className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 font-mono text-xs
                 border border-slate-300 dark:border-green-500/15

@@ -1,15 +1,19 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeftIcon, PaperAirplaneIcon, LinkIcon } from "@heroicons/react/24/outline";
-import LinkCard from "../components/LinkCard";
+import {
+    ArrowLeftIcon,
+    PaperAirplaneIcon,
+    LinkIcon,
+} from "@heroicons/react/24/outline";
+
+import LinkCardTile from "../components/LinkCardTile";
+import type { LinkStatus } from "../components/LinkCardTile";
 
 const card =
     "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur";
 
 const focusRing =
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-green-400 dark:focus-visible:ring-offset-black";
-
-type LinkStatus = "active" | "used" | "revoked" | "expired";
 
 type ChatItem =
     | {
@@ -29,12 +33,11 @@ type ChatItem =
         time: string;
         status: LinkStatus;
         meta?: string;
-        };
+    };
 
 export default function ChatThread() {
     const navigate = useNavigate();
 
-    // Initial UI-only mock items (memoized so it doesn't re-create)
     const initialItems: ChatItem[] = useMemo(
         () => [
         { id: "m1", type: "text", fromMe: false, text: "You got the invite code?", time: "09:12" },
@@ -94,19 +97,18 @@ export default function ChatThread() {
 
     const [items, setItems] = useState<ChatItem[]>(initialItems);
 
-    // Revoke handler: updates only the clicked Link Card
     const revokeLinkCard = (id: string) => {
         setItems((prev) =>
         prev.map((it) => {
             if (it.type !== "link_card") return it;
             if (it.id !== id) return it;
 
-            // only revoke if it's active AND fromMe (safety)
+            // safety: only your active cards can be revoked
             if (!it.fromMe || it.status !== "active") return it;
 
             return {
             ...it,
-            status: "revoked" as const,
+            status: "revoked",
             meta: "revoked just now",
             };
         })
@@ -119,6 +121,7 @@ export default function ChatThread() {
         <div className={`${card} mb-4 p-3 flex items-center justify-between gap-3`}>
             <div className="flex items-center gap-3">
             <button
+                type="button"
                 onClick={() => navigate("/app/messages")}
                 className={`rounded-lg p-1 hover:bg-emerald-500/10 ${focusRing}`}
                 aria-label="Back"
@@ -136,8 +139,9 @@ export default function ChatThread() {
             </div>
             </div>
 
-            {/* Generate Link Card (UI-only) */}
+            {/* Generate Link Card (UI-only placeholder) */}
             <button
+            type="button"
             className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 font-mono text-sm
                 border border-emerald-500/25 dark:border-green-500/25
                 bg-emerald-500/10 dark:bg-green-500/10
@@ -157,7 +161,7 @@ export default function ChatThread() {
             item.type === "text" ? (
                 <TextBubble key={item.id} fromMe={item.fromMe} text={item.text} time={item.time} />
             ) : (
-                <LinkCard
+                <LinkCardTile
                 key={item.id}
                 fromMe={item.fromMe}
                 code={item.code}
@@ -166,7 +170,11 @@ export default function ChatThread() {
                 time={item.time}
                 status={item.status}
                 meta={item.meta}
-                onRevoke={item.fromMe && item.status === "active" ? () => revokeLinkCard(item.id) : undefined}
+                onRevoke={
+                    item.fromMe && item.status === "active"
+                    ? () => revokeLinkCard(item.id)
+                    : undefined
+                }
                 />
             )
             )}
@@ -183,8 +191,10 @@ export default function ChatThread() {
                 placeholder:text-slate-500 dark:placeholder:text-green-300/50
                 outline-none ${focusRing}`}
             />
+
             <button
                 disabled
+                type="button"
                 className="rounded-xl p-2 border border-emerald-500/25 dark:border-green-500/25 text-slate-400 dark:text-green-400/40 cursor-not-allowed"
                 aria-label="Send"
             >

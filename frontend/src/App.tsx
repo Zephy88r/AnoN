@@ -5,7 +5,7 @@ import Landing from "./pages/Landing";
 import HomeFeed from "./pages/HomeFeed";
 import Map from "./pages/Map";
 import Trust from "./pages/Trust";
-import LinkCards from "./components/LinkCard";
+import LinkCards from "./pages/LinkCards";
 import ChatThread from "./pages/ChatThread";
 import Messages from "./pages/Messages";
 import Settings from "./pages/Settings";
