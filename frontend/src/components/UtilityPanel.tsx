@@ -1,155 +1,169 @@
 import { useLocation } from "react-router-dom";
+import { useTrust } from "../contexts/TrustContext";
+import { useTheme } from "../contexts/ThemeContext";
+import { useGeoPings } from "../hooks/useGeoPings";
+
 
 export default function UtilityPanel() {
-    const location = useLocation();
-
-    const path = location.pathname;
-
-    const isFeed = path.startsWith("/app/feed");
-    const isTrust = path.startsWith("/app/trust");
-    const isMap = path.startsWith("/app/map");
-    const isSettings = path.startsWith("/app/settings");
+    const { pathname } = useLocation();
 
     return (
         <aside className="border-l border-emerald-500/15 dark:border-green-500/20 bg-white/50 dark:bg-black/45 backdrop-blur-xl p-4 space-y-4">
-        {isFeed && <FeedUtility />}
-        {isTrust && <TrustUtility />}
-        {isMap && <MapUtility />}
-        {isSettings && <SettingsUtility />}
+        {pathname.startsWith("/app/feed") && <FeedUtility />}
+        {pathname.startsWith("/app/trust") && <TrustUtility />}
+        {pathname.startsWith("/app/map") && <MapUtility />}
+        {pathname.startsWith("/app/settings") && <SettingsUtility />}
         </aside>
     );
-}
+    }
 
-/* ---------- Shared Card Style ---------- */
-const card =
+
+    const card =
     "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/60 dark:bg-black/50 p-3";
 
-/* ---------- Feed ---------- */
-function FeedUtility() {
+    function UtilityCard({
+    title,
+    children,
+    }: {
+    title: string;
+    children: React.ReactNode;
+    }) {
+    return (
+        <div className={card}>
+        <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-1">
+            {title}
+        </div>
+        {children}
+        </div>
+    );
+    }
+
+    function Pill({ label }: { label: string }) {
+    return (
+        <span className="inline-block rounded-full px-2 py-0.5 text-xs font-mono border border-emerald-500/25 bg-emerald-500/10 dark:bg-green-500/10 text-emerald-800 dark:text-green-200">
+        {label}
+        </span>
+    );
+    }
+
+
+    function FeedUtility() {
     return (
         <>
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-1">
-            Network
-            </div>
+        <UtilityCard title="Network">
             <div className="text-sm text-slate-800 dark:text-green-200">
-            Region: NEPAL
+            Region: <span className="font-mono">NEPAL</span>
             </div>
-            <div className="text-xs text-slate-600 dark:text-green-300/70">
-            Mode: Ghost
+            <div className="mt-1">
+            <Pill label="Ghost Mode" />
             </div>
-        </div>
+        </UtilityCard>
 
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-1">
-            Posting Limits
-            </div>
+        <UtilityCard title="Posting Limits">
             <div className="text-sm text-slate-800 dark:text-green-200">
-            Posts left: 3
+            Posts left today
             </div>
-        </div>
+            <div className="mt-1 font-mono text-lg text-emerald-700 dark:text-green-300">
+            3
+            </div>
+        </UtilityCard>
         </>
     );
-}
+    }
 
-/* ---------- Trust ---------- */
-function TrustUtility() {
+    function TrustUtility() {
+    const { requests } = useTrust();
+
+    const pending = requests.filter((r) => r.status === "pending").length;
+    const accepted = requests.filter((r) => r.status === "accepted").length;
+
+    const level =
+        accepted >= 5 ? "ESTABLISHED" : accepted >= 1 ? "KNOWN" : "NEW";
+
     return (
         <>
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-1">
-            Trust Status
-            </div>
+        <UtilityCard title="Trust Level">
             <div className="text-sm text-slate-800 dark:text-green-200">
-            Level: <span className="font-mono">NEW</span>
+            Level: <span className="font-mono">{level}</span>
             </div>
             <div className="text-xs text-slate-600 dark:text-green-300/70">
-            Post limit: 3/day
+            Based on accepted connections
             </div>
-        </div>
+        </UtilityCard>
 
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-1">
-            Invite Code
+        <UtilityCard title="Pending Requests">
+            {pending > 0 ? (
+            <div className="text-sm text-emerald-700 dark:text-green-300">
+                {pending} awaiting action
             </div>
-            <div className="font-mono text-lg text-slate-900 dark:text-green-100">
-            7F3K-91QZ
+            ) : (
+            <div className="text-sm text-slate-600 dark:text-green-300/60">
+                None pending
             </div>
-            <div className="text-xs text-slate-600 dark:text-green-300/70">
-            Share privately
-            </div>
-        </div>
-
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-1">
-            Pending Requests
-            </div>
-            <div className="text-sm text-slate-800 dark:text-green-200">
-            2 awaiting action
-            </div>
-        </div>
+            )}
+        </UtilityCard>
         </>
     );
-}
+    }
 
-/* ---------- Map ---------- */
-function MapUtility() {
+    function MapUtility() {
+    const ghostMode = true; // UI mirror (map owns real toggle)
+    const region = "NEPAL • BAGMATI";
+
+    const { geoState, pings } = useGeoPings({
+        region,
+        mode: ghostMode ? "ghost" : "reveal",
+        enabled: false, // utility panel = read-only
+    });
+
     return (
         <>
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-1">
-            Map Visibility
-            </div>
+        <UtilityCard title="Map Visibility">
             <div className="text-sm text-slate-800 dark:text-green-200">
-            Ghost Mode: ON
+            Mode: <span className="font-mono">{ghostMode ? "GHOST" : "REVEAL"}</span>
             </div>
             <div className="text-xs text-slate-600 dark:text-green-300/70">
-            Location hidden
+            Location concealed
             </div>
-        </div>
+        </UtilityCard>
 
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-1">
-            Region Activity
-            </div>
+        <UtilityCard title="Region Activity">
             <div className="text-sm text-slate-800 dark:text-green-200">
-            14 active ghosts
+            Active ghosts: <span className="font-mono">{pings.length}</span>
             </div>
-        </div>
+            <div className="text-xs text-slate-600 dark:text-green-300/70">
+            Geo: {geoState.status}
+            </div>
+        </UtilityCard>
         </>
     );
-}
+    }
 
-/* ---------- Settings ---------- */
-function SettingsUtility() {
+    function SettingsUtility() {
+    const { theme } = useTheme();
+
     return (
         <>
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-1">
-            Appearance
-            </div>
+        <UtilityCard title="Appearance">
             <div className="text-sm text-slate-800 dark:text-green-200">
-            Theme: System
+            Theme: <span className="font-mono">{theme}</span>
             </div>
-        </div>
+        </UtilityCard>
 
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-1">
-            Privacy
-            </div>
+        <UtilityCard title="Privacy">
             <div className="text-sm text-slate-800 dark:text-green-200">
-            Ghost Mode: ON
+            Ghost Mode: <span className="font-mono">ON</span>
             </div>
-        </div>
+        </UtilityCard>
 
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-1">
-            Identity
-            </div>
+        <UtilityCard title="Identity">
             <div className="text-sm text-slate-800 dark:text-green-200">
-            Anonymous ID
+            Anonymous
             </div>
-        </div>
+            <div className="text-xs text-slate-600 dark:text-green-300/70">
+            No profile • No history
+            </div>
+        </UtilityCard>
         </>
     );
 }

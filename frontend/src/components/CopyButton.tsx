@@ -2,18 +2,27 @@ import { useEffect, useRef, useState } from "react";
 import { ClipboardDocumentIcon } from "@heroicons/react/24/outline";
 
 interface CopyButtonProps {
-    value: string;
+  /** Preferred prop (new) */
+    value?: string;
+
+  /** Legacy prop (old pages) */
+    text?: string;
+
     disabled?: boolean;
     size?: "sm" | "md";
-    }
+}
 
-    export default function CopyButton({
+export default function CopyButton({
     value,
+    text,
     disabled = false,
     size = "md",
     }: CopyButtonProps) {
     const [copied, setCopied] = useState(false);
     const timerRef = useRef<number | null>(null);
+
+    // 🔑 Resolve actual text to copy
+    const copyValue = value ?? text ?? "";
 
     useEffect(() => {
         return () => {
@@ -22,10 +31,10 @@ interface CopyButtonProps {
     }, []);
 
     const handleCopy = async () => {
-        if (disabled) return;
+        if (disabled || !copyValue) return;
 
         try {
-        await navigator.clipboard.writeText(value);
+        await navigator.clipboard.writeText(copyValue);
         setCopied(true);
 
         if (timerRef.current) window.clearTimeout(timerRef.current);
@@ -42,12 +51,12 @@ interface CopyButtonProps {
     return (
         <button
         type="button"
-        disabled={disabled}
+        disabled={disabled || !copyValue}
         onClick={handleCopy}
         className={`inline-flex items-center gap-2 rounded-xl font-mono border
             ${padding}
             ${
-            disabled
+            disabled || !copyValue
                 ? "border-emerald-500/10 dark:border-green-500/10 text-slate-400 dark:text-green-400/40 cursor-not-allowed"
                 : "border-emerald-500/25 dark:border-green-500/25 bg-emerald-500/10 dark:bg-green-500/10 text-slate-800 dark:text-green-200 hover:bg-emerald-500/15 dark:hover:bg-green-500/15"
             }
