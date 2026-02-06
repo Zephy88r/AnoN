@@ -1,20 +1,24 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import TrustRequestModal from "../components/TrustRequestModal";
 import { useTrust } from "../contexts/TrustContext";
 
 export default function HomeFeed() {
+    const navigate = useNavigate();
+
     const [hoveredReplyId, setHoveredReplyId] = useState<number | null>(null);
 
+    // TrustContext is the single source of truth (persists via localStorage)
     const { submitTrustRequest, getStatusForUser } = useTrust();
 
-  // Step B modal state
+    // Step B modal state
     const [trustOpen, setTrustOpen] = useState(false);
     const [pendingPostId, setPendingPostId] = useState<number | null>(null);
 
     const openTrustModal = (postId: number) => {
-    setPendingPostId(postId);
-    setTrustOpen(true);
-    setHoveredReplyId(null);
+        setPendingPostId(postId);
+        setTrustOpen(true);
+        setHoveredReplyId(null);
     };
 
     const closeTrustModal = () => {
@@ -26,7 +30,7 @@ export default function HomeFeed() {
     const confirmTrustRequest = (postId: number, message?: string) => {
         submitTrustRequest({
         fromLabel: `User #${483920 + postId}`,
-        fromUserKey: `user_${483920 + postId}`,
+        fromUserKey: `user_${483920 + postId}`, // threadId
         postId,
         note: message,
         });
@@ -34,6 +38,7 @@ export default function HomeFeed() {
 
     return (
         <div className="mx-auto w-full max-w-3xl space-y-6 px-3 sm:px-0">
+            
         {/* Header */}
         <div className="rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -80,14 +85,13 @@ export default function HomeFeed() {
         {/* Posts */}
         <div className="space-y-4">
             {[1, 2, 3].map((id) => {
-            const userKey = `user_${483920 + id}`;
+            const userKey = `user_${483920 + id}`; // threadId & trust key
             const status = getStatusForUser(userKey); // "none" | "pending" | "accepted" | "declined"
             const trusted = status === "accepted";
 
-            // Pending is *only* when modal is open and this is the selected post
             const isPendingHere = trustOpen && pendingPostId === id;
 
-            const buttonLabel =
+            const trustButtonLabel =
                 status === "none" ? (
                 isPendingHere ? (
                     <span className="inline-flex items-center gap-2">
@@ -105,9 +109,9 @@ export default function HomeFeed() {
                 "Declined"
                 );
 
-            const buttonDisabled = status !== "none" || isPendingHere;
+            const trustButtonDisabled = status !== "none" || isPendingHere;
 
-            const buttonClass =
+            const trustButtonClass =
                 status === "none"
                 ? isPendingHere
                     ? "border-emerald-500/25 dark:border-green-500/25 bg-emerald-500/5 dark:bg-green-500/5 text-slate-500 dark:text-green-200/70 cursor-not-allowed select-none"
@@ -131,16 +135,21 @@ export default function HomeFeed() {
                 </div>
 
                 <p className="text-slate-800 dark:text-green-100 leading-relaxed">
-                    This is a sample anonymous post. No identity, no profile, just thoughts shared freely on the network.
+                    This is a sample anonymous post. No identity, no profile, just
+                    thoughts shared freely on the network.
                 </p>
 
                 {/* Actions */}
                 <div className="mt-3 flex flex-wrap gap-3 text-xs font-mono">
-                    {/* Reply + tooltip */}
+                    {/* Reply with trust gate + tooltip */}
                     <div className="relative">
                     <button
                         type="button"
                         disabled={!trusted}
+                        onClick={() => {
+                        if (!trusted) return;
+                        navigate(`/app/messages/${userKey}`);
+                        }}
                         onMouseEnter={() => !trusted && setHoveredReplyId(id)}
                         onMouseLeave={() => setHoveredReplyId(null)}
                         onFocus={() => !trusted && setHoveredReplyId(id)}
@@ -175,11 +184,11 @@ export default function HomeFeed() {
                     <div className="flex flex-col items-start gap-1">
                     <button
                         type="button"
-                        disabled={buttonDisabled}
+                        disabled={trustButtonDisabled}
                         onClick={() => openTrustModal(id)}
-                        className={`rounded-lg px-3 py-1 border transition ${buttonClass}`}
+                        className={`rounded-lg px-3 py-1 border transition ${trustButtonClass}`}
                     >
-                        {buttonLabel}
+                        {trustButtonLabel}
                     </button>
 
                     {status === "pending" && (

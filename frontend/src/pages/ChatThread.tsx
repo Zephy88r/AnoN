@@ -1,13 +1,11 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import {
-    ArrowLeftIcon,
-    PaperAirplaneIcon,
-    LinkIcon,
-} from "@heroicons/react/24/outline";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { ArrowLeftIcon, PaperAirplaneIcon, LinkIcon } from "@heroicons/react/24/outline";
 
 import LinkCardTile from "../components/LinkCardTile";
 import type { LinkStatus } from "../components/LinkCardTile";
+import { useTrust } from "../contexts/TrustContext";
+import { useChat } from "../contexts/ChatContext";
 
 const card =
     "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur";
@@ -16,13 +14,7 @@ const focusRing =
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-green-400 dark:focus-visible:ring-offset-black";
 
 type ChatItem =
-    | {
-        id: string;
-        type: "text";
-        fromMe: boolean;
-        text: string;
-        time: string;
-        }
+    | { id: string; type: "text"; fromMe: boolean; text: string; time: string }
     | {
         id: string;
         type: "link_card";
@@ -35,14 +27,29 @@ type ChatItem =
         meta?: string;
     };
 
+function prettyUserLabel(threadId: string) {
+    const num = threadId.replace("user_", "");
+    return `User #${num}`;
+}
+
 export default function ChatThread() {
     const navigate = useNavigate();
+    const { threadId = "" } = useParams();
 
+    const { getStatusForUser } = useTrust();
+    const { getThreadMessages, sendText } = useChat();
+
+    const status = useMemo(
+        () => (threadId ? getStatusForUser(threadId) : "none"),
+        [threadId, getStatusForUser]
+    );
+    const trusted = status === "accepted";
+
+    // Demo items (static)
     const initialItems: ChatItem[] = useMemo(
         () => [
         { id: "m1", type: "text", fromMe: false, text: "You got the invite code?", time: "09:12" },
         { id: "m2", type: "text", fromMe: true, text: "Yes. Sent it an hour ago.", time: "09:13" },
-
         {
             id: "l1",
             type: "link_card",
@@ -53,9 +60,7 @@ export default function ChatThread() {
             time: "09:14",
             status: "active",
         },
-
         { id: "m3", type: "text", fromMe: false, text: "Received. I’ll use it later.", time: "09:15" },
-
         {
             id: "l2",
             type: "link_card",
@@ -67,7 +72,6 @@ export default function ChatThread() {
             status: "used",
             meta: "used 2m ago",
         },
-
         {
             id: "l3",
             type: "link_card",
@@ -79,7 +83,6 @@ export default function ChatThread() {
             status: "revoked",
             meta: "revoked by you",
         },
-
         {
             id: "l4",
             type: "link_card",
@@ -96,23 +99,61 @@ export default function ChatThread() {
     );
 
     const [items, setItems] = useState<ChatItem[]>(initialItems);
+    const [draft, setDraft] = useState("");
+
+    const bottomRef = useRef<HTMLDivElement | null>(null);
 
     const revokeLinkCard = (id: string) => {
         setItems((prev) =>
         prev.map((it) => {
             if (it.type !== "link_card") return it;
             if (it.id !== id) return it;
-
-            // safety: only your active cards can be revoked
             if (!it.fromMe || it.status !== "active") return it;
-
-            return {
-            ...it,
-            status: "revoked",
-            meta: "revoked just now",
-            };
+            return { ...it, status: "revoked", meta: "revoked just now" };
         })
         );
+    };
+
+    const headerLine =
+        status === "accepted"
+        ? "Encrypted • Trusted channel"
+        : status === "pending"
+            ? "Locked • Trust pending"
+            : status === "declined"
+            ? "Locked • Trust declined"
+            : "Locked • Trust required";
+
+    const savedMessages = threadId ? getThreadMessages(threadId) : [];
+
+    const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+        // wait a tick so DOM updates first
+        requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ behavior, block: "end" });
+        });
+    };
+
+    // Scroll to latest on open / thread change
+    useEffect(() => {
+        scrollToBottom("auto");
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [threadId]);
+
+    // Scroll to latest after new saved message
+    useEffect(() => {
+        scrollToBottom("smooth");
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [savedMessages.length]);
+
+    const doSend = () => {
+        if (!trusted) return;
+        if (!threadId) return;
+
+        const text = draft.trim();
+        if (!text) return;
+
+        sendText(threadId, text);
+        setDraft("");
+        // scroll will happen via effect
     };
 
     return (
@@ -131,24 +172,24 @@ export default function ChatThread() {
 
             <div>
                 <div className="font-mono text-sm text-slate-900 dark:text-green-200">
-                Trusted #A91F
+                {threadId ? prettyUserLabel(threadId) : "Thread"}
+                {status === "accepted" ? " • Trusted" : ""}
                 </div>
-                <div className="text-xs text-slate-600 dark:text-green-300/70">
-                Encrypted • Trusted channel
-                </div>
+                <div className="text-xs text-slate-600 dark:text-green-300/70">{headerLine}</div>
             </div>
             </div>
 
-            {/* Generate Link Card (UI-only placeholder) */}
             <button
             type="button"
+            disabled={!trusted}
             className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 font-mono text-sm
                 border border-emerald-500/25 dark:border-green-500/25
                 bg-emerald-500/10 dark:bg-green-500/10
                 text-slate-800 dark:text-green-200
                 hover:bg-emerald-500/15 dark:hover:bg-green-500/15
+                disabled:opacity-60 disabled:cursor-not-allowed
                 ${focusRing}`}
-            title="Generate Link Card (UI only)"
+            title={trusted ? "Generate Link Card (UI only)" : "Trust required"}
             >
             <LinkIcon className="h-5 w-5" />
             Link Card
@@ -157,6 +198,7 @@ export default function ChatThread() {
 
         {/* Stream */}
         <div className="flex-1 overflow-y-auto space-y-3 px-2">
+            {/* demo stream */}
             {items.map((item) =>
             item.type === "text" ? (
                 <TextBubble key={item.id} fromMe={item.fromMe} text={item.text} time={item.time} />
@@ -170,32 +212,55 @@ export default function ChatThread() {
                 time={item.time}
                 status={item.status}
                 meta={item.meta}
-                onRevoke={
-                    item.fromMe && item.status === "active"
-                    ? () => revokeLinkCard(item.id)
-                    : undefined
-                }
+                onRevoke={trusted && item.fromMe && item.status === "active" ? () => revokeLinkCard(item.id) : undefined}
                 />
             )
             )}
+
+            {/* saved messages (persisted) */}
+            {savedMessages.map((m) => (
+            <TextBubble
+                key={m.id}
+                fromMe={m.fromMe}
+                text={m.text}
+                time={new Date(m.createdAtISO).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            />
+            ))}
+
+            {/* bottom anchor */}
+            <div ref={bottomRef} />
         </div>
 
-        {/* Composer (disabled) */}
+        {/* Composer */}
         <div className={`${card} mt-4 p-3`}>
-            <div className="flex items-center gap-3">
-            <input
-                disabled
-                placeholder="Type a message…"
-                className={`flex-1 rounded-xl bg-transparent px-3 py-2
+            <div className="flex items-end gap-3">
+            <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                disabled={!trusted}
+                rows={2}
+                placeholder={trusted ? "Type a message… (Enter to send, Shift+Enter for new line)" : "Trust required to message"}
+                onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    doSend();
+                }
+                }}
+                className={`flex-1 resize-none rounded-xl bg-transparent px-3 py-2
                 text-slate-900 dark:text-green-100
                 placeholder:text-slate-500 dark:placeholder:text-green-300/50
+                disabled:cursor-not-allowed disabled:opacity-60
                 outline-none ${focusRing}`}
             />
 
             <button
-                disabled
+                disabled={!trusted || draft.trim().length === 0}
                 type="button"
-                className="rounded-xl p-2 border border-emerald-500/25 dark:border-green-500/25 text-slate-400 dark:text-green-400/40 cursor-not-allowed"
+                onClick={doSend}
+                className="rounded-xl p-2 border border-emerald-500/25 dark:border-green-500/25
+                text-slate-700 dark:text-green-200
+                hover:bg-emerald-500/10 dark:hover:bg-green-500/10
+                disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label="Send"
             >
                 <PaperAirplaneIcon className="h-5 w-5" />
@@ -203,7 +268,7 @@ export default function ChatThread() {
             </div>
 
             <div className="mt-1 text-xs text-slate-600 dark:text-green-300/60">
-            Messaging unlocked via trust
+            {trusted ? "Messaging unlocked via trust" : "Messaging locked until trust is accepted"}
             </div>
         </div>
         </div>
@@ -213,7 +278,7 @@ export default function ChatThread() {
     /* ---------- Text Bubble ---------- */
 
     function TextBubble({ fromMe, text, time }: { fromMe: boolean; text: string; time: string }) {
-    const base = "max-w-[75%] rounded-2xl px-3 py-2 text-sm leading-relaxed";
+    const base = "max-w-[75%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap";
 
     return fromMe ? (
         <div className="flex justify-end">

@@ -1,149 +1,123 @@
-import {
-    ChatBubbleLeftRightIcon,
-    ClockIcon,
-    CheckCircleIcon,
-    XCircleIcon,
-} from "@heroicons/react/24/outline";
-import { useNavigate } from "react-router-dom";
+    import { useMemo } from "react";
+    import { useNavigate } from "react-router-dom";
+    import { useTrust } from "../contexts/TrustContext";
 
-const card =
-    "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-4";
+    const card =
+    "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur";
 
-const focusRing =
-    "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-green-400 dark:focus-visible:ring-offset-black";
+    function prettyUserLabel(threadId: string) {
+    // user_483921 -> User #483921
+    const num = threadId.replace("user_", "");
+    return `User #${num}`;
+    }
 
-export default function Messages() {
+    function timeAgo(iso: string) {
+    const ms = Date.now() - new Date(iso).getTime();
+    const m = Math.max(1, Math.floor(ms / 60000));
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24);
+    return `${d}d ago`;
+    }
+
+    export default function Messages() {
     const navigate = useNavigate();
+    const { requests } = useTrust();
+
+    // Only show accepted (trusted) threads
+    const threads = useMemo(() => {
+        const accepted = requests
+        .filter((r) => r.status === "accepted")
+        // de-dupe by fromUserKey (keep newest)
+        .sort((a, b) => new Date(b.createdAtISO).getTime() - new Date(a.createdAtISO).getTime());
+
+        const seen = new Set<string>();
+        const deduped = [];
+        for (const r of accepted) {
+        if (seen.has(r.fromUserKey)) continue;
+        seen.add(r.fromUserKey);
+        deduped.push(r);
+        }
+        return deduped;
+    }, [requests]);
 
     return (
-        <div className="mx-auto w-full max-w-3xl space-y-6">
+        <div className="mx-auto w-full max-w-3xl space-y-6 px-3 sm:px-0">
         {/* Header */}
-        <div className={card}>
-            <div className="flex items-center gap-3">
-            <ChatBubbleLeftRightIcon className="h-6 w-6 text-emerald-700 dark:text-green-300" />
+        <div className={`${card} p-4`}>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
                 <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">
                 Messages
                 </h1>
                 <p className="text-sm text-slate-700 dark:text-green-300/70">
-                Private conversations with trusted ghosts
+                Trusted channels only
                 </p>
             </div>
+
+            <div className="w-fit rounded-full border border-emerald-600/30 dark:border-green-500/30 bg-white/60 dark:bg-black/20 px-3 py-1 text-sm font-mono text-emerald-800 dark:text-green-300">
+                threads: {threads.length}
+            </div>
             </div>
         </div>
 
-        {/* Requests */}
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-            Requests
+        {/* Threads */}
+        <div className="space-y-3">
+            {threads.length === 0 ? (
+            <div className={`${card} p-4`}>
+                <p className="text-sm text-slate-700 dark:text-green-300/70">
+                No trusted threads yet. Accept a trust request to unlock messaging.
+                </p>
+
+                <button
+                type="button"
+                onClick={() => navigate("/app/trust")}
+                className="mt-3 rounded-xl px-3 py-2 text-xs font-mono border border-emerald-500/25 dark:border-green-500/25
+                    bg-emerald-500/10 dark:bg-green-500/10 text-slate-900 dark:text-green-200
+                    hover:bg-emerald-500/15 dark:hover:bg-green-500/15"
+                >
+                Go to Trust
+                </button>
             </div>
+            ) : (
+            threads.map((t) => (
+                <button
+                key={t.id}
+                type="button"
+                onClick={() => navigate(`/app/messages/${t.fromUserKey}`)}
+                className={`${card} w-full text-left p-4 transition hover:bg-emerald-500/5 dark:hover:bg-green-500/5`}
+                >
+                <div className="flex items-center justify-between gap-3">
+                    <div>
+                    <div className="font-mono text-sm text-emerald-700 dark:text-green-300">
+                        {t.fromLabel || prettyUserLabel(t.fromUserKey)}
+                    </div>
+                    <div className="mt-1 text-xs font-mono text-slate-500 dark:text-green-300/60">
+                        {timeAgo(t.createdAtISO)} • trusted
+                        {typeof t.postId === "number" ? ` • post ${t.postId}` : ""}
+                    </div>
+                    </div>
 
-            <div className="space-y-3">
-            <RequestRow anon="User #884201" time="1h ago" />
-            <RequestRow anon="User #552901" time="6h ago" />
-            </div>
-        </div>
+                    <div className="rounded-full px-3 py-1 text-xs font-mono border border-emerald-500/25 dark:border-green-500/25
+                    bg-emerald-500/10 dark:bg-green-500/10 text-emerald-800 dark:text-green-200">
+                    Open
+                    </div>
+                </div>
 
-        {/* Chats */}
-        <div className={card}>
-            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-            Trusted Chats
-            </div>
-
-            <div className="space-y-2">
-            <ChatRow
-                anon="Trusted #A91F"
-                preview="You there?"
-                time="2m ago"
-                onOpen={() => navigate("/app/messages/a91f")}
-            />
-            <ChatRow
-                anon="Trusted #C204"
-                preview="Sent the code."
-                time="1d ago"
-                onOpen={() => navigate("/app/messages/c204")}
-            />
-            </div>
-        </div>
-        </div>
-    );
-    }
-
-    /* ---------- Components ---------- */
-
-    function RequestRow({ anon, time }: { anon: string; time: string }) {
-    return (
-        <div className="flex items-center justify-between rounded-xl border border-emerald-500/15 dark:border-green-500/20 bg-white/50 dark:bg-black/35 px-3 py-2">
-        <div>
-            <div className="font-mono text-sm text-slate-900 dark:text-green-200">
-            {anon}
-            </div>
-            <div className="text-xs text-slate-600 dark:text-green-300/70 flex items-center gap-1">
-            <ClockIcon className="h-4 w-4" />
-            requested {time}
-            </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-            <button
-            className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 font-mono text-sm
-                border border-emerald-600/25 dark:border-green-500/25
-                bg-emerald-500/10 dark:bg-green-500/10
-                text-slate-900 dark:text-green-200
-                hover:bg-emerald-500/15 dark:hover:bg-green-500/15
-                ${focusRing}`}
-            >
-            <CheckCircleIcon className="h-5 w-5" />
-            Accept
-            </button>
-
-            <button
-            className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 font-mono text-sm
-                border border-slate-300 dark:border-green-500/15
-                bg-white/60 dark:bg-black/30
-                text-slate-700 dark:text-green-300/70
-                hover:bg-slate-100 dark:hover:bg-green-500/10
-                ${focusRing}`}
-            >
-            <XCircleIcon className="h-5 w-5" />
-            Decline
-            </button>
+                {t.note ? (
+                    <div className="mt-3 text-sm text-slate-700 dark:text-green-100/80 line-clamp-2">
+                    {t.note}
+                    </div>
+                ) : (
+                    <div className="mt-3 text-sm text-slate-600 dark:text-green-300/60">
+                    No preview available.
+                    </div>
+                )}
+                </button>
+            ))
+            )}
         </div>
         </div>
     );
     }
-
-    function ChatRow({
-    anon,
-    preview,
-    time,
-    onOpen,
-    }: {
-    anon: string;
-    preview: string;
-    time: string;
-    onOpen: () => void;
-    }) {
-    return (
-        <button
-        onClick={onOpen}
-        className={`w-full text-left rounded-xl border border-emerald-500/15 dark:border-green-500/20
-            bg-white/50 dark:bg-black/35 px-3 py-3
-            hover:bg-emerald-500/10 dark:hover:bg-green-500/10
-            ${focusRing}`}
-        >
-        <div className="flex items-center justify-between mb-1">
-            <div className="font-mono text-sm text-slate-900 dark:text-green-200">
-            {anon}
-            </div>
-            <div className="text-xs text-slate-600 dark:text-green-300/70">
-            {time}
-            </div>
-        </div>
-
-        <div className="text-sm text-slate-700 dark:text-green-300/80 truncate">
-            {preview}
-        </div>
-        </button>
-    );
-}

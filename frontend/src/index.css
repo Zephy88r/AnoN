@@ -3,7 +3,6 @@
 /* Tailwind v4: enable class-based dark variant */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* optional but high impact polish */
 :root {
     color-scheme: light dark;
 }
@@ -14,4 +13,56 @@
 
 body {
     font-feature-settings: "ss01" 1, "ss02" 1;
+}
+
+/* ================================
+    Radar / Geo Ping Animations
+================================ */
+
+/* TRUE radar ring: expand outward + fade out */
+@keyframes radar-expand {
+    0% {
+        transform: scale(0.55);
+        opacity: 0.0;
+    }
+    12% {
+        opacity: 0.55;
+    }
+    100% {
+        transform: scale(2.35);
+        opacity: 0.0;
+    }
+}
+
+/* Softer secondary ring */
+@keyframes radar-expand-soft {
+    0% {
+        transform: scale(0.75);
+        opacity: 0.0;
+    }
+    18% {
+        opacity: 0.28;
+    }
+    100% {
+        transform: scale(2.65);
+        opacity: 0.0;
+    }
+}
+
+/* Silent “echo” sweep arc */
+@keyframes radar-echo {
+    0% {
+        transform: rotate(0deg);
+        opacity: 0;
+    }
+    12% {
+        opacity: 0.18;
+    }
+    60% {
+        opacity: 0.06;
+    }
+    100% {
+        transform: rotate(360deg);
+        opacity: 0;
+    }
 }
