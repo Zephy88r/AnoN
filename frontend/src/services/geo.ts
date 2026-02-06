@@ -1,4 +1,4 @@
-// src/services/geo.ts
+import { storage } from "./storage";
 export type GeoMode = "ghost" | "reveal";
 
 
@@ -94,8 +94,7 @@ function loadPulses(): StoredPulse[] {
     }
 
     function savePulses(pulses: StoredPulse[]) {
-    localStorage.setItem(LS_KEY, JSON.stringify(pulses));
-    }
+        storage.setJSON(key, pulses, { version: 1 });    }
 
     // device anon id (temporary)
     export function getAnonDeviceKey() {

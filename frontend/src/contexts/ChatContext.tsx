@@ -1,44 +1,38 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { storage } from "../services/storage";
 
 export type ChatTextMessage = {
     id: string;
     fromMe: boolean;
     text: string;
     createdAtISO: string;
-    };
+};
 
-    type ChatContextValue = {
+type ChatContextValue = {
     getThreadMessages: (threadId: string) => ChatTextMessage[];
     sendText: (threadId: string, text: string) => void;
     getLastMessage: (threadId: string) => ChatTextMessage | null;
-    };
+};
 
-    const ChatContext = createContext<ChatContextValue | null>(null);
+const ChatContext = createContext<ChatContextValue | null>(null);
 
-    const STORAGE_KEY = "ghost_chat_messages_v1";
+// Storage config
+const STORAGE_KEY = "chat_threads";
+const STORAGE_VERSION = 1;
 
-    type StoreShape = Record<string, ChatTextMessage[]>;
+type StoreShape = Record<string, ChatTextMessage[]>;
 
-    function safeParse<T>(raw: string | null, fallback: T): T {
-    try {
-        if (!raw) return fallback;
-        return JSON.parse(raw) as T;
-    } catch {
-        return fallback;
-    }
-    }
-
-    function makeId() {
+function makeId() {
     return `m_${Math.random().toString(36).slice(2)}_${Date.now()}`;
-    }
+}
 
-    export function ChatProvider({ children }: { children: React.ReactNode }) {
+export function ChatProvider({ children }: { children: React.ReactNode }) {
     const [store, setStore] = useState<StoreShape>(() =>
-        safeParse<StoreShape>(localStorage.getItem(STORAGE_KEY), {})
+        storage.getJSON<StoreShape>(STORAGE_KEY, {}, { version: STORAGE_VERSION })
     );
 
     useEffect(() => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+        storage.setJSON(STORAGE_KEY, store, { version: STORAGE_VERSION });
     }, [store]);
 
     const getThreadMessages = (threadId: string) => store[threadId] ?? [];
@@ -68,6 +62,7 @@ export type ChatTextMessage = {
 
     const value = useMemo(
         () => ({ getThreadMessages, sendText, getLastMessage }),
+        // store changes trigger rerender + memo refresh; that's fine for now
         [store]
     );
 

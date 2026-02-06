@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { storage } from "../services/storage";
 
 export type TrustStatus = "none" | "pending" | "accepted" | "declined";
 
@@ -18,7 +19,7 @@ type TrustContextValue = {
         fromLabel: string;
         fromUserKey: string;
         postId?: number;
-        note?: string;
+            note?: string;
     }) => void;
     acceptRequest: (requestId: string) => void;
     declineRequest: (requestId: string) => void;
@@ -28,29 +29,22 @@ type TrustContextValue = {
 
 const TrustContext = createContext<TrustContextValue | null>(null);
 
-const STORAGE_KEY = "ghost_trust_requests_v1";
+// Storage config
+const STORAGE_KEY = "trust_requests";
+const STORAGE_VERSION = 1;
 
-function safeParse<T>(raw: string | null, fallback: T): T {
-    try {
-        if (!raw) return fallback;
-        return JSON.parse(raw) as T;
-    } catch {
-        return fallback;
-    }
-    }
-
-    function makeId() {
+function makeId() {
     return `tr_${Math.random().toString(36).slice(2)}_${Date.now()}`;
-    }
+}
 
-    export function TrustProvider({ children }: { children: React.ReactNode }) {
+export function TrustProvider({ children }: { children: React.ReactNode }) {
     const [requests, setRequests] = useState<TrustRequest[]>(() =>
-        safeParse<TrustRequest[]>(localStorage.getItem(STORAGE_KEY), [])
+        storage.getJSON<TrustRequest[]>(STORAGE_KEY, [], { version: STORAGE_VERSION })
     );
 
-    // persist
+  // persist
     useEffect(() => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(requests));
+        storage.setJSON(STORAGE_KEY, requests, { version: STORAGE_VERSION });
     }, [requests]);
 
     const submitTrustRequest: TrustContextValue["submitTrustRequest"] = (req) => {
