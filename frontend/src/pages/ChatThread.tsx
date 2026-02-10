@@ -6,6 +6,8 @@ import LinkCardTile from "../components/LinkCardTile";
 import type { LinkStatus } from "../components/LinkCardTile";
 import { useTrust } from "../contexts/TrustContext";
 import { useChat } from "../contexts/ChatContext";
+import { getThreadById } from "../services/thread";
+import { connectChatWS } from "../services/chatWs";
 
 const card =
     "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur";
@@ -27,11 +29,6 @@ type ChatItem =
         meta?: string;
     };
 
-function prettyUserLabel(threadId: string) {
-    const num = threadId.replace("user_", "");
-    return `User #${num}`;
-}
-
 export default function ChatThread() {
     const navigate = useNavigate();
     const { threadId = "" } = useParams();
@@ -39,11 +36,69 @@ export default function ChatThread() {
     const { getStatusForUser } = useTrust();
     const { getThreadMessages, sendText } = useChat();
 
+    const thread = useMemo(() => (threadId ? getThreadById(threadId) : null), [threadId]);
+    const peerAnonId = thread?.peerAnonId;
+
     const status = useMemo(
-        () => (threadId ? getStatusForUser(threadId) : "none"),
-        [threadId, getStatusForUser]
+        () => (peerAnonId ? getStatusForUser(peerAnonId) : "none"),
+        [peerAnonId, getStatusForUser]
     );
     const trusted = status === "accepted";
+
+    // ✅ WebSocket connection
+    const [ws, setWs] = useState<WebSocket | null>(null);
+    const [wsConnected, setWsConnected] = useState(false);
+
+    useEffect(() => {
+        if (!trusted || !peerAnonId) return;
+
+        let mounted = true;
+
+        (async () => {
+            try {
+                const socket = await connectChatWS(peerAnonId, {
+                    onOpen: () => {
+                        if (mounted) {
+                            console.log("[ChatThread] WS opened");
+                            setWsConnected(true);
+                        }
+                    },
+                    onMessage: (data: unknown) => {
+                        if (!mounted || !threadId) return;
+                        const msg = data as { type?: string; text?: string; from?: string };
+                        if (msg.type === "text" && msg.text) {
+                            console.log("[ChatThread] received:", msg);
+                        }
+                    },
+                    onClose: () => {
+                        if (mounted) {
+                            console.log("[ChatThread] WS closed");
+                            setWsConnected(false);
+                        }
+                    },
+                    onError: (err) => {
+                        console.error("[ChatThread] WS error:", err);
+                    },
+                });
+
+                if (mounted) {
+                    setWs(socket);
+                }
+            } catch (err) {
+                console.error("[ChatThread] failed to connect WS:", err);
+            }
+        })();
+
+        return () => {
+            mounted = false;
+            if (ws) {
+                ws.close();
+                setWs(null);
+                setWsConnected(false);
+            }
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [trusted, peerAnonId, threadId]);
 
     // Demo items (static)
     const initialItems: ChatItem[] = useMemo(
@@ -151,6 +206,16 @@ export default function ChatThread() {
         const text = draft.trim();
         if (!text) return;
 
+        // ✅ Send via WebSocket if connected
+        if (wsConnected && ws) {
+            try {
+                ws.send(JSON.stringify({ type: "text", text }));
+            } catch (err) {
+                console.error("[ChatThread] failed to send via WS:", err);
+            }
+        }
+
+        // Store locally
         sendText(threadId, text);
         setDraft("");
         // scroll will happen via effect
@@ -172,8 +237,9 @@ export default function ChatThread() {
 
             <div>
                 <div className="font-mono text-sm text-slate-900 dark:text-green-200">
-                {threadId ? prettyUserLabel(threadId) : "Thread"}
+                {thread ? `peer: ${thread.peerAnonId.slice(0, 8)}…` : "Thread"}
                 {status === "accepted" ? " • Trusted" : ""}
+                {wsConnected && " • 🟢"}
                 </div>
                 <div className="text-xs text-slate-600 dark:text-green-300/70">{headerLine}</div>
             </div>

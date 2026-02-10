@@ -51,7 +51,7 @@ export const storage = {
         if (!raw) return fallback;
 
         const parsed = safeParse(raw);
-            if (parsed === null || parsed === undefined) return fallback;
+            if (parsed === null) return fallback;
 
             // ✅ If it's a primitive (string/number/bool), allow it (legacy raw JSON path)
             if (typeof parsed !== "object") {
@@ -66,7 +66,8 @@ export const storage = {
                 }
             }
 
-            return (parsed as T) ?? fallback;
+            // Return primitive as-is (best-effort type cast)
+            return parsed as T;
             }
 
 

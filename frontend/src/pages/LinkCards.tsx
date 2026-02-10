@@ -1,18 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   PlusIcon,
-  LinkIcon,
-  TrashIcon,
-  ClockIcon,
-  CheckCircleIcon,
-  XCircleIcon,
   ArrowRightIcon,
 } from "@heroicons/react/24/outline";
 
 import CopyButton from "../components/CopyButton";
 import { createLinkCard, fetchMyLinkCards } from "../services/linkCardsApi";
 import { requestTrust } from "../services/trustApi";
+import { getSessionToken } from "../services/api";
 
 type LinkStatus = "active" | "used" | "revoked" | "expired";
 
@@ -32,16 +27,6 @@ const focusRing =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-green-400 dark:focus-visible:ring-offset-black";
 
 /** ---- Helpers ---- */
-function fmtAge(iso: string) {
-  const ms = Date.now() - Date.parse(iso);
-  const m = Math.max(1, Math.round(ms / 60000));
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.round(h / 24);
-  return `${d}d ago`;
-}
-
 function fmtUntil(iso: string) {
   const ms = Date.parse(iso) - Date.now();
   const m = Math.round(ms / 60000);
@@ -59,8 +44,6 @@ function normalizeCode(raw: string) {
 }
 
 export default function LinkCards() {
-  const navigate = useNavigate();
-
   const [cards, setCards] = useState<LinkCard[]>([]);
   const [note, setNote] = useState("");
   const [enterCode, setEnterCode] = useState("");
@@ -68,19 +51,28 @@ export default function LinkCards() {
     useState<"idle" | "verifying" | "ok" | "error">("idle");
   const [enterMsg, setEnterMsg] = useState("");
 
-  /** Load my cards */
+  /** Load my cards - wait for session */
   useEffect(() => {
-    fetchMyLinkCards().then((apiCards) => {
-      setCards(
-        apiCards.map((c) => ({
-          id: `lc_${c.code}`,
-          code: c.code,
-          status: c.status,
-          createdAtISO: new Date().toISOString(),
-          expiresAtISO: c.expires_at,
-        }))
-      );
-    });
+    if (!getSessionToken()) {
+      console.log("[LinkCards] waiting for session...");
+      return;
+    }
+
+    fetchMyLinkCards()
+      .then((apiCards) => {
+        setCards(
+          apiCards.map((c) => ({
+            id: `lc_${c.code}`,
+            code: c.code,
+            status: c.status,
+            createdAtISO: new Date().toISOString(),
+            expiresAtISO: c.expires_at,
+          }))
+        );
+      })
+      .catch((err) => {
+        console.error("[LinkCards] fetch failed:", err);
+      });
   }, []);
 
   const activeCount = useMemo(

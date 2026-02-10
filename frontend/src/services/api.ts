@@ -1,41 +1,78 @@
 import { storage } from "./storage";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
-const TOKEN_KEY = "session_token"; // storage adds "ghost:" prefix
+const TOKEN_KEY = "session_token"; // storage prefixes with ghost:
 
-export function getSessionToken(): string | null {
-    const raw = storage.getJSON<string | null>("session_token", null);
+// Track if we're currently rebootstrapping to prevent infinite loops
+let isRebootstrapping = false;
+let rebootstrapPromise: Promise<void> | null = null;
 
-    if (!raw) return null;
+function unwrapToken(raw: unknown): string | null {
+  // raw might already be string OR stringified string
+    if (typeof raw !== "string" || !raw) return null;
 
-    if (raw.startsWith('"') && raw.endsWith('"')) {
+    let s: unknown = raw;
+
+  // unwrap up to 2 times (covers '"token"' and '"\"token\""' cases)
+    for (let i = 0; i < 2; i++) {
+        if (typeof s === "string" && s.startsWith('"') && s.endsWith('"')) {
         try {
-        const unwrapped = JSON.parse(raw);
-        return typeof unwrapped === "string" ? unwrapped : null;
+            s = JSON.parse(s);
+            continue;
         } catch {
-        return null;
+            break;
         }
+        }
+        break;
     }
 
-    return raw;
+    return typeof s === "string" && s.length > 0 ? s : null;
 }
 
+export function getSessionToken(): string | null {
+    const raw = storage.getJSON<string | null>(TOKEN_KEY, null);
+    return unwrapToken(raw);
+}
 
 export function setSessionToken(token: string) {
+    // store the raw token string, not JSON string of JSON string
     storage.setJSON(TOKEN_KEY, token);
+}
+
+// Internal rebootstrap function - only called by apiFetch on 401
+async function rebootstrapOnce(): Promise<void> {
+    if (isRebootstrapping) {
+        // Wait for existing rebootstrap to complete
+        if (rebootstrapPromise) await rebootstrapPromise;
+        return;
     }
 
-    type ApiFetchOptions = {
-    auth?: boolean; // default true
-    };
+    isRebootstrapping = true;
+    rebootstrapPromise = (async () => {
+        try {
+            console.log("[api] 401 detected, rebootstrapping session...");
+            // Use dynamic import to avoid circular dependency
+            const { bootstrapSession } = await import("./session");
+            await bootstrapSession();
+            console.log("[api] rebootstrap complete");
+        } catch (err) {
+            console.error("[api] rebootstrap failed:", err);
+            throw err;
+        } finally {
+            isRebootstrapping = false;
+            rebootstrapPromise = null;
+        }
+    })();
+
+    await rebootstrapPromise;
+}
 
     export async function apiFetch<T>(
-    path: string,
+    path: string, 
     options: RequestInit = {},
-    apiOpts: ApiFetchOptions = {}
-    ): Promise<T> {
+    config?: { auth?: boolean; _isRetry?: boolean }
+): Promise<T> {
     const url = `${API_BASE}${path}`;
-    const auth = apiOpts.auth !== false; // default true
 
     const headers: Record<string, string> = {
         ...(options.headers as Record<string, string> | undefined),
@@ -45,17 +82,34 @@ export function setSessionToken(token: string) {
         headers["Content-Type"] = "application/json";
     }
 
-    // ✅ Only require token when auth=true
-    if (auth) {
+    // ✅ Only attach auth if enabled (default true, can disable via config)
+    const shouldAuth = config?.auth !== false;
+    if (shouldAuth) {
         const token = getSessionToken();
-        if (!token) {
-        // This is the error you're seeing — now it will NOT happen for auth:false calls
-        throw new Error("Missing session token");
+        if (token) {
+            headers["Authorization"] = `Bearer ${token}`;
+            
+            // 🔍 DEV-ONLY debug (do not log full token)
+            if (import.meta.env.DEV) {
+                console.log(`[api] auth header attached: len=${token.length}, startsWith=${token.startsWith("eyJ")}`);
+            }
         }
-        headers["Authorization"] = `Bearer ${token}`;
     }
 
     const res = await fetch(url, { ...options, headers });
+
+    // ✅ Handle 401: rebootstrap once and retry
+    if (res.status === 401 && shouldAuth && !config?._isRetry) {
+        console.log("[api] 401 unauthorized, attempting rebootstrap...");
+        try {
+            await rebootstrapOnce();
+            // Retry the request with new token
+            return apiFetch<T>(path, options, { ...config, _isRetry: true });
+        } catch (err) {
+            console.error("[api] rebootstrap failed, cannot retry:", err);
+            // Fall through to normal error handling
+        }
+    }
 
     if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -64,6 +118,5 @@ export function setSessionToken(token: string) {
 
     const ct = res.headers.get("content-type") || "";
     if (ct.includes("application/json")) return (await res.json()) as T;
-
     return (await res.text()) as unknown as T;
 }

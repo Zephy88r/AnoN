@@ -7,6 +7,7 @@ import React, {
     } from "react";
 import { fetchTrustStatus, respondTrust } from "../services/trustApi";
 import { getSessionToken } from "../services/api";
+import { ensureThreadForPeer } from "../services/thread";
 
 export type TrustStatus = "none" | "pending" | "accepted" | "declined";
 
@@ -24,6 +25,7 @@ export type TrustRequest = {
     declineRequest: (id: string) => Promise<void>;
     isTrusted: (peerKey: string) => boolean;
     getStatusForUser: (peerKey: string) => TrustStatus;
+    getAcceptedPeers: () => string[]; // ✅ list of accepted peer anon ids
     refresh: () => Promise<void>;
     };
 
@@ -75,16 +77,18 @@ export function TrustProvider({ children }: { children: React.ReactNode }) {
 
     const acceptRequest = async (id: string) => {
         await respondTrust(id, "accepted");
+        
+        // ✅ Create thread for this peer after accepting trust
+        const req = requests.find(r => r.id === id);
+        if (req?.peerKey) {
+            ensureThreadForPeer(req.peerKey);
+        }
+        
         await refresh();
     };
 
     const declineRequest = async (id: string) => {
         await respondTrust(id, "declined");
-
-        const req = requests.find(r => r.id === id);
-        if (req) {
-            ensureThread(req.peerKey); 
-        }
         await refresh();
     };
 
@@ -96,6 +100,13 @@ export function TrustProvider({ children }: { children: React.ReactNode }) {
         return r ? r.status : "none";
     };
 
+    const getAcceptedPeers = (): string[] => {
+        return requests
+            .filter((r) => r.status === "accepted")
+            .map((r) => r.peerKey)
+            .filter((k) => k && k.length > 0);
+    };
+
     const value = useMemo(
         () => ({
         requests,
@@ -103,6 +114,7 @@ export function TrustProvider({ children }: { children: React.ReactNode }) {
         declineRequest,
         isTrusted,
         getStatusForUser,
+        getAcceptedPeers,
         refresh,
         }),
         [requests]

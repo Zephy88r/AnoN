@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+console.log("VITE_API_BASE_URL =", import.meta.env.VITE_API_BASE_URL);
+
 
 import PageShell from "./components/PageShell";
 import Landing from "./pages/Landing";
@@ -10,6 +12,7 @@ import LinkCards from "./pages/LinkCards";
 import Messages from "./pages/Messages";
 import ChatThread from "./pages/ChatThread";
 import Settings from "./pages/Settings";
+import Admin from "./pages/Admin";
 
 import RequireTrust from "./components/RequireTrust";
 import { bootstrapSession } from "./services/session";
@@ -68,6 +71,7 @@ export default function App() {
             }
           />
           <Route path="settings" element={<Settings />} />
+          <Route path="admin" element={<Admin />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

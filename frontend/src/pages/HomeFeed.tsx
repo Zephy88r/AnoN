@@ -1,21 +1,78 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import TrustRequestModal from "../components/TrustRequestModal";
 import { useTrust } from "../contexts/TrustContext";
+import { ensureThreadForPeer } from "../services/thread";
+import { createPost, fetchFeed } from "../services/postsApi";
+import type { ApiPost } from "../services/postsApi";
 
 export default function HomeFeed() {
     const navigate = useNavigate();
 
     const [hoveredReplyId, setHoveredReplyId] = useState<number | null>(null);
+    const [posts, setPosts] = useState<ApiPost[]>([]);
+    const [postText, setPostText] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [postsLeftToday, setPostsLeftToday] = useState(3);
 
     // TrustContext is the single source of truth (persists via localStorage)
-    const { submitTrustRequest, getStatusForUser } = useTrust();
+    const { getStatusForUser } = useTrust();
 
     // Step B modal state
     const [trustOpen, setTrustOpen] = useState(false);
-    const [pendingPostId, setPendingPostId] = useState<number | null>(null);
+    const [pendingPostId, setPendingPostId] = useState<string | null>(null);
 
-    const openTrustModal = (postId: number) => {
+    // Load posts on mount
+    useEffect(() => {
+        const loadPosts = async () => {
+            try {
+                const result = await fetchFeed();
+                setPosts(result.posts);
+            } catch (err) {
+                console.error("Failed to load feed:", err);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        loadPosts();
+    }, []);
+
+    const handlePostSubmit = async () => {
+        const trimmedText = postText.trim();
+        
+        if (!trimmedText) {
+            alert("Post cannot be empty");
+            return;
+        }
+
+        if (trimmedText.length > 280) {
+            alert("Post exceeds 280 characters");
+            return;
+        }
+
+        if (postsLeftToday <= 0) {
+            alert("Daily post limit reached");
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
+            const newPost = await createPost(trimmedText);
+            // Add new post to the top of the feed
+            setPosts([newPost, ...posts]);
+            setPostText("");
+            setPostsLeftToday(postsLeftToday - 1);
+        } catch (err) {
+            console.error("Post creation failed:", err);
+            const errorMessage = err instanceof Error ? err.message : "Error creating post";
+            alert(errorMessage);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const openTrustModal = (postId: string) => {
         setPendingPostId(postId);
         setTrustOpen(true);
         setHoveredReplyId(null);
@@ -27,13 +84,10 @@ export default function HomeFeed() {
         setHoveredReplyId(null);
     };
 
-    const confirmTrustRequest = (postId: number, message?: string) => {
-        submitTrustRequest({
-        fromLabel: `User #${483920 + postId}`,
-        fromUserKey: `user_${483920 + postId}`, // threadId
-        postId,
-        note: message,
-        });
+    const confirmTrustRequest = (_postId: string, _message?: string) => {
+        // Trust request would be implemented here
+        console.log("Trust request for post:", _postId);
+        closeTrustModal();
     };
 
     return (
@@ -52,44 +106,62 @@ export default function HomeFeed() {
             </div>
 
             <div className="w-fit rounded-full border border-emerald-600/30 dark:border-green-500/30 bg-white/60 dark:bg-black/20 px-3 py-1 text-sm font-mono text-emerald-800 dark:text-green-300">
-                3 posts left
+                {postsLeftToday} posts left
             </div>
             </div>
         </div>
 
-        {/* Post Composer (disabled for now) */}
+        {/* Post Composer */}
         <div className="rounded-2xl border border-emerald-500/20 dark:border-green-500/20 bg-white/60 dark:bg-black/50 backdrop-blur p-4 space-y-3">
             <textarea
-            disabled
-            placeholder="What’s on your mind?"
-            className="w-full resize-none rounded-xl bg-transparent p-3 text-slate-900 dark:text-green-100 placeholder:text-slate-500 dark:placeholder:text-green-300/50 outline-none"
+            value={postText}
+            onChange={(e) => setPostText(e.target.value)}
+            placeholder="What's on your mind?"
+            className="w-full resize-none rounded-xl bg-transparent p-3 text-slate-900 dark:text-green-100 placeholder:text-slate-500 dark:placeholder:text-green-300/50 outline-none focus:ring-2 focus:ring-emerald-500/30 dark:focus:ring-green-500/30"
             rows={3}
+            maxLength={280}
             />
 
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <span className="text-xs font-mono text-slate-600 dark:text-green-300/70">
-                posts left today: 3
+                {postText.length}/280 • {postsLeftToday} posts left today
             </span>
 
             <button
-                disabled
+                disabled={isSubmitting || postsLeftToday <= 0 || !postText.trim()}
                 type="button"
+                onClick={handlePostSubmit}
                 className="w-full sm:w-auto rounded-xl px-4 py-2 text-sm font-mono border border-emerald-500/30 dark:border-green-500/30
-                text-slate-500 dark:text-green-400/50 cursor-not-allowed"
+                bg-emerald-500/10 dark:bg-green-500/10 text-emerald-800 dark:text-green-300 hover:bg-emerald-500/20 dark:hover:bg-green-500/20
+                disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-                Post
+                {isSubmitting ? "Posting..." : "Post"}
             </button>
             </div>
         </div>
 
         {/* Posts */}
+        {isLoading ? (
+            <div className="text-center py-8 text-slate-600 dark:text-green-300/70">Loading feed...</div>
+        ) : posts.length === 0 ? (
+            <div className="text-center py-8 text-slate-600 dark:text-green-300/70">No posts yet. Be the first to post!</div>
+        ) : (
         <div className="space-y-4">
-            {[1, 2, 3].map((id) => {
-            const userKey = `user_${483920 + id}`; // threadId & trust key
+            {posts.map((post) => {
+            const userKey = `user_${post.anon_id.substring(0, 8)}`; // threadId & trust key
             const status = getStatusForUser(userKey); // "none" | "pending" | "accepted" | "declined"
             const trusted = status === "accepted";
 
-            const isPendingHere = trustOpen && pendingPostId === id;
+            const isPendingHere = trustOpen && pendingPostId === post.id;
+
+            const timeAgo = (isoDate: string) => {
+                const minutes = Math.floor((Date.now() - new Date(isoDate).getTime()) / 60000);
+                if (minutes < 1) return "just now";
+                if (minutes < 60) return `${minutes}m ago`;
+                const hours = Math.floor(minutes / 60);
+                if (hours < 24) return `${hours}h ago`;
+                return `${Math.floor(hours / 24)}d ago`;
+            };
 
             const trustButtonLabel =
                 status === "none" ? (
@@ -122,21 +194,20 @@ export default function HomeFeed() {
 
             return (
                 <div
-                key={id}
+                key={post.id}
                 className="rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/60 dark:bg-black/50 backdrop-blur p-4"
                 >
                 <div className="flex items-center justify-between mb-2">
                     <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
-                    User #{483920 + id}
+                    User #{post.anon_id.substring(0, 8)}
                     </span>
                     <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">
-                    {id * 2}m ago
+                    {timeAgo(post.created_at)}
                     </span>
                 </div>
 
                 <p className="text-slate-800 dark:text-green-100 leading-relaxed">
-                    This is a sample anonymous post. No identity, no profile, just
-                    thoughts shared freely on the network.
+                    {post.text}
                 </p>
 
                 {/* Actions */}
@@ -148,11 +219,12 @@ export default function HomeFeed() {
                         disabled={!trusted}
                         onClick={() => {
                         if (!trusted) return;
-                        navigate(`/app/messages/${userKey}`);
+                        const thread = ensureThreadForPeer(userKey);
+                        navigate(`/app/messages/${thread.id}`);
                         }}
-                        onMouseEnter={() => !trusted && setHoveredReplyId(id)}
+                        onMouseEnter={() => !trusted && setHoveredReplyId(parseInt(post.id.substring(0, 8), 16))}
                         onMouseLeave={() => setHoveredReplyId(null)}
-                        onFocus={() => !trusted && setHoveredReplyId(id)}
+                        onFocus={() => !trusted && setHoveredReplyId(parseInt(post.id.substring(0, 8), 16))}
                         onBlur={() => setHoveredReplyId(null)}
                         className={`font-mono transition ${
                         trusted
@@ -163,7 +235,7 @@ export default function HomeFeed() {
                         reply
                     </button>
 
-                    {!trusted && hoveredReplyId === id && (
+                    {!trusted && hoveredReplyId === parseInt(post.id.substring(0, 8), 16) && (
                         <div
                         className="
                             absolute left-1/2 -translate-x-1/2 mt-2
@@ -185,7 +257,7 @@ export default function HomeFeed() {
                     <button
                         type="button"
                         disabled={trustButtonDisabled}
-                        onClick={() => openTrustModal(id)}
+                        onClick={() => openTrustModal(post.id)}
                         className={`rounded-lg px-3 py-1 border transition ${trustButtonClass}`}
                     >
                         {trustButtonLabel}
@@ -209,12 +281,27 @@ export default function HomeFeed() {
                         </span>
                     )}
                     </div>
+
+                    {/* ✅ Start Chat button (only when trusted) */}
+                    {trusted && (
+                        <button
+                        type="button"
+                        onClick={() => {
+                            const thread = ensureThreadForPeer(userKey);
+                            navigate(`/app/messages/${thread.id}`);
+                        }}
+                        className="rounded-lg px-3 py-1 border border-emerald-500/30 dark:border-green-500/30
+                            bg-emerald-500/10 dark:bg-green-500/10 text-slate-800 dark:text-green-200
+                            hover:bg-emerald-500/15 dark:hover:bg-green-500/15 transition"
+                        >
+                        Start chat
+                        </button>
+                    )}
                 </div>
                 </div>
             );
             })}
-        </div>
-
+        </div>        )}
         {/* Step B: Trust Request Modal */}
         <TrustRequestModal
             open={trustOpen}

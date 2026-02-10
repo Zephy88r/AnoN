@@ -1,4 +1,5 @@
 import { storage } from "./storage";
+import { getMyAnonId } from "./session";
 
 export type ChatThread = {
     id: string;              // used in route: /app/messages/:threadId
@@ -86,6 +87,28 @@ export function ensureThread(myAnonId: string, peerAnonId: string): ChatThread {
         peerAnonId,
         createdAtISO: nowISO(),
     });
+}
+
+/**
+ * ✅ Convenience: automatically uses getMyAnonId() from session
+ * IMPORTANT: thread.id must NOT be peerAnonId directly.
+ */
+export function ensureThreadForPeer(peerAnonId: string): ChatThread {
+    const myAnonId = getMyAnonId();
+    if (!myAnonId) {
+        // Fallback: create thread with temporary ID
+        const id = `th_${peerAnonId.slice(0, 8)}`;
+        const existing = getThreadById(id);
+        if (existing) return existing;
+
+        return upsertThread({
+            id,
+            peerAnonId,
+            createdAtISO: nowISO(),
+        });
+    }
+
+    return ensureThread(myAnonId, peerAnonId);
 }
 
 /**

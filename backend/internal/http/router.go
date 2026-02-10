@@ -14,7 +14,7 @@ import (
 
 // trustAdapter lets WS handlers ask trust questions safely
 type trustAdapter struct {
-	store *store.MemStore
+	store store.Store
 }
 
 func (t trustAdapter) IsAccepted(a, b string) bool {
@@ -32,12 +32,11 @@ func NewRouter(cfg config.Config) http.Handler {
 	r.Use(CORS([]string{"http://localhost:5173"}))
 
 	// ✅ shared stores
-	mem := store.DefaultStore()
+	str := store.DefaultStore()
 	tickets := ws.NewTicketStore()
 	hub := ws.NewHub()
-	go hub.Run()
 
-	trust := trustAdapter{store: mem}
+	trust := trustAdapter{store: str}
 
 	// -------- SESSION --------
 	r.Route("/session", func(sr chi.Router) {
@@ -61,6 +60,32 @@ func NewRouter(cfg config.Config) http.Handler {
 	// -------- WS --------
 	r.With(SessionAuth(cfg)).Post("/ws/ticket", handlers.CreateWSTicket(tickets, trust))
 	r.Get("/ws/chat", handlers.WSChat(hub, tickets, cfg, trust))
+
+	// -------- POSTS (FEED) --------
+	r.Route("/posts", func(pr chi.Router) {
+		pr.With(SessionAuth(cfg)).Post("/create", handlers.PostCreate(cfg))
+		pr.With(SessionAuth(cfg)).Get("/feed", handlers.PostFeed(cfg))
+	})
+
+	// Admin routes (protected by ADMIN_KEY)
+	r.Route("/admin", func(ar chi.Router) {
+		ar.Use(AdminAuth(cfg))
+		ar.Get("/posts", handlers.AdminGetPosts(cfg))
+		ar.Post("/posts/delete", handlers.AdminDeletePost(cfg))
+		ar.Get("/users", handlers.AdminGetUsers(cfg))
+		ar.Get("/stats", handlers.AdminGetStats(cfg))
+		ar.Get("/sessions", handlers.AdminGetSessions(cfg))
+		ar.Get("/trust", handlers.AdminGetTrustGraph(cfg))
+		ar.Get("/abuse", handlers.AdminGetAbuseDashboard(cfg))
+		ar.Get("/audit", handlers.AdminGetAuditLog(cfg))
+		ar.Get("/health", handlers.AdminGetHealth(cfg))
+	})
+
+	// -------- GEO (MAP) --------
+	r.Route("/geo", func(gr chi.Router) {
+		gr.With(SessionAuth(cfg)).Post("/ping", handlers.GeoPing(cfg))
+		gr.With(SessionAuth(cfg)).Get("/nearby", handlers.GeoNearby(cfg))
+	})
 
 	// -------- HEALTH --------
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {

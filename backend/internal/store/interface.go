@@ -1,0 +1,73 @@
+package store
+
+import "time"
+
+// Store is the interface all storage backends must implement.
+type Store interface {
+	// Link Cards
+	PutCard(c *LinkCard)
+	GetCard(code string) (*LinkCard, bool)
+	CardsByOwner(owner string) []*LinkCard
+
+	// Trust Requests
+	PutTrust(t *TrustRequest)
+	GetTrust(id string) (*TrustRequest, bool)
+	TrustForAnon(anon string) []*TrustRequest
+	TrustAccepted(a, b string) bool
+
+	// Posts
+	PutPost(p *Post)
+	GetFeed(limit int) []*Post
+	CanCreatePost(anonID string) bool
+
+	// Geo Pings
+	PutGeo(ping *GeoPing)
+	GetNearby(lat, lng float64, radiusKm float64) []*GeoPing
+
+	// Admin methods
+	GetAllUsers() []*UserInfo
+	GetAllSessions() []*SessionInfo
+	GetAllTrustRequests() []*TrustRequest
+	GetAuditLogs() []AuditLog
+	DeletePost(postID string) error
+	LogAuditEvent(event AuditLog)
+	PutSession(session SessionInfo)
+}
+
+// Admin types
+type UserInfo struct {
+	AnonID    string
+	CreatedAt time.Time
+	PostCount int
+}
+
+type SessionInfo struct {
+	AnonID    string
+	Token     string
+	ExpiresAt time.Time
+	CreatedAt time.Time
+}
+
+type AuditLog struct {
+	ID        string
+	Action    string
+	AnonID    string
+	Details   string
+	Timestamp time.Time
+}
+
+var defaultStore Store
+
+// Initialize sets the default store. Call this once during app startup.
+func Initialize(store Store) {
+	defaultStore = store
+}
+
+// DefaultStore returns the global store instance.
+func DefaultStore() Store {
+	if defaultStore == nil {
+		// Fallback to in-memory for backwards compatibility
+		defaultStore = NewMemStore()
+	}
+	return defaultStore
+}

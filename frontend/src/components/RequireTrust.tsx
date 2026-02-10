@@ -1,8 +1,9 @@
 import { Navigate, useLocation, useParams } from "react-router-dom";
 import { useTrust } from "../contexts/TrustContext";
 import { getThreadById } from "../services/thread";
+import React from "react";
 
-export default function RequireTrust({ children }: { children: JSX.Element }) {
+export default function RequireTrust({ children }: { children: React.ReactElement }) {
     const { threadId } = useParams();
     const location = useLocation();
     const { isTrusted } = useTrust();

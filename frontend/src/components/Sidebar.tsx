@@ -6,6 +6,7 @@ import {
     LinkIcon,
     ChatBubbleLeftRightIcon,
     Cog6ToothIcon,
+    ShieldCheckIcon,
     } from "@heroicons/react/24/outline";
 
     const items = [
@@ -14,6 +15,7 @@ import {
     { name: "Trust", to: "/app/trust", icon: UserGroupIcon },
     { name: "Link Cards", to: "/app/link-cards", icon: LinkIcon },
     { name: "Messages", to: "/app/messages", icon: ChatBubbleLeftRightIcon },
+    { name: "Admin", to: "/app/admin", icon: ShieldCheckIcon },
     ];
 
     export default function Sidebar() {

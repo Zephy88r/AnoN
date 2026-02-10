@@ -8,6 +8,7 @@ import (
 	"anon-backend/internal/config"
 	"anon-backend/internal/httpctx"
 	"anon-backend/internal/security"
+	"anon-backend/internal/store"
 	"anon-backend/internal/types"
 )
 
@@ -29,6 +30,14 @@ func SessionBootstrap(cfg config.Config) http.HandlerFunc {
 			http.Error(w, "failed to sign token", http.StatusInternalServerError)
 			return
 		}
+
+		now := time.Now()
+		store.DefaultStore().PutSession(store.SessionInfo{
+			AnonID:    anonID,
+			Token:     token,
+			ExpiresAt: now.Add(cfg.JWTTTL),
+			CreatedAt: now,
+		})
 
 		resp := types.BootstrapResponse{
 			Token:  token,

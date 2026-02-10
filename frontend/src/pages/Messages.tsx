@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { listThreads, type ChatThread } from "../services/thread";
+import { listThreads, ensureThreadForPeer, type ChatThread } from "../services/thread";
 import { useTrust } from "../contexts/TrustContext";
 
 const card =
@@ -24,15 +24,27 @@ function shortKey(k: string) {
 
 export default function Messages() {
     const navigate = useNavigate();
-    const { isTrusted, requests } = useTrust(); // requests used only for “no threads yet” UX
+    const { isTrusted, getAcceptedPeers, requests } = useTrust();
     const [threads, setThreads] = useState<ChatThread[]>([]);
 
-    // Load threads from storage + re-check when trust updates
+    // ✅ Build threads from accepted peers + load existing threads
     useEffect(() => {
-        setThreads(listThreads());
-    }, [requests]);
+        const acceptedPeers = getAcceptedPeers();
+        
+        // Ensure threads exist for all accepted peers
+        acceptedPeers.forEach((peerAnonId) => {
+            ensureThreadForPeer(peerAnonId);
+        });
+
+        // Load all threads from storage - always returns array
+        const allThreads = listThreads();
+        setThreads(Array.isArray(allThreads) ? allThreads : []);
+    }, [requests, getAcceptedPeers]);
 
     const visible = useMemo(() => {
+    // Safety: ensure threads is array
+    if (!Array.isArray(threads)) return [];
+    
     // Only show threads where peer is trusted
     const trusted = threads.filter((t) => t.peerAnonId && isTrusted(t.peerAnonId));
 
