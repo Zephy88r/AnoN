@@ -1,19 +1,17 @@
 import { apiFetch, setSessionToken } from "./api";
-import { getAnonDeviceKey } from "./geo"; // ✅ correct import
 
-type BootstrapResponse = {
-    token: string;
-    anon_id?: string;
-};
+type BootstrapResp = { token: string };
 
-export async function bootstrapSession(region?: string) {
-    const device_key = getAnonDeviceKey();
+export async function bootstrapSession(): Promise<string> {
+    const res = await apiFetch<BootstrapResp>(
+        "/session/bootstrap",
+        {
+        method: "POST",
+        body: JSON.stringify({ device_key: "web", region: "Koshi" }),
+        },
+        { auth: false } // ✅ critical
+    );
 
-    const resp = await apiFetch<BootstrapResponse>("/session/bootstrap", {
-    method: "POST",
-    body: JSON.stringify({ device_key, region }),
-    });
-
-    setSessionToken(resp.token);
-    return resp;
+    setSessionToken(res.token);
+    return res.token;
 }

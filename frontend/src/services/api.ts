@@ -1,45 +1,59 @@
+import { storage } from "./storage";
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
-
-// api.ts (ONLY place that touches the token)
-
-const TOKEN_KEY = "ghost:session_token";
+const TOKEN_KEY = "session_token"; // storage adds "ghost:" prefix
 
 export function getSessionToken(): string | null {
-    const raw = localStorage.getItem(TOKEN_KEY);
+    const raw = storage.getJSON<string | null>("session_token", null);
+
     if (!raw) return null;
 
-    try {
-        const token = JSON.parse(raw); // unwrap once
-        return typeof token === "string" ? token : null;
-    } catch {
+    if (raw.startsWith('"') && raw.endsWith('"')) {
+        try {
+        const unwrapped = JSON.parse(raw);
+        return typeof unwrapped === "string" ? unwrapped : null;
+        } catch {
         return null;
+        }
     }
+
+    return raw;
 }
 
+
 export function setSessionToken(token: string) {
-    localStorage.setItem(TOKEN_KEY, JSON.stringify(token));
-}
+    storage.setJSON(TOKEN_KEY, token);
+    }
+
+    type ApiFetchOptions = {
+    auth?: boolean; // default true
+    };
 
     export async function apiFetch<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    apiOpts: ApiFetchOptions = {}
     ): Promise<T> {
     const url = `${API_BASE}${path}`;
+    const auth = apiOpts.auth !== false; // default true
 
     const headers: Record<string, string> = {
         ...(options.headers as Record<string, string> | undefined),
     };
 
-    if (
-        options.body &&
-        !(options.body instanceof FormData) &&
-        !headers["Content-Type"]
-    ) {
+    if (options.body && !(options.body instanceof FormData) && !headers["Content-Type"]) {
         headers["Content-Type"] = "application/json";
     }
 
-    const token = getSessionToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
+    // ✅ Only require token when auth=true
+    if (auth) {
+        const token = getSessionToken();
+        if (!token) {
+        // This is the error you're seeing — now it will NOT happen for auth:false calls
+        throw new Error("Missing session token");
+        }
+        headers["Authorization"] = `Bearer ${token}`;
+    }
 
     const res = await fetch(url, { ...options, headers });
 

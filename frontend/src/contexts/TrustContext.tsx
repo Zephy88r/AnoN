@@ -1,15 +1,22 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+    createContext,
+    useContext,
+    useEffect,
+    useMemo,
+    useState,
+    } from "react";
 import { fetchTrustStatus, respondTrust } from "../services/trustApi";
+import { getSessionToken } from "../services/api";
 
 export type TrustStatus = "none" | "pending" | "accepted" | "declined";
 
 export type TrustRequest = {
     id: string;
-    peerKey: string;
+    peerKey: string; // anon id (other side)
     code?: string;
     status: Exclude<TrustStatus, "none">;
-    createdAtISO: string;
-    };
+    createdAtISO?: string;
+};
 
     type TrustContextValue = {
     requests: TrustRequest[];
@@ -22,36 +29,48 @@ export type TrustRequest = {
 
     const TrustContext = createContext<TrustContextValue | null>(null);
 
-    export function TrustProvider({ children }: { children: React.ReactNode }) {
+export function TrustProvider({ children }: { children: React.ReactNode }) {
     const [requests, setRequests] = useState<TrustRequest[]>([]);
 
     const refresh = async () => {
+        // ✅ If session not ready yet, skip (prevents 401 spam)
+        if (!getSessionToken()) return;
+
+        try {
         const res = await fetchTrustStatus();
 
-        const mapped: TrustRequest[] = [
-        ...res.incoming.map((r) => ({
+        const all: TrustRequest[] = [
+            ...res.incoming.map((r) => ({
             id: r.request_id,
-            peerKey: r.from_anon || "",
+            peerKey: r.from_anon ?? "",
             code: r.code,
-            status: r.status, // pending/accepted/declined
-            createdAtISO: new Date().toISOString(),
-        })),
-        ...res.outgoing.map((r) => ({
+            status: r.status,
+            createdAtISO: r.created_at || r.updated_at,
+            })),
+            ...res.outgoing.map((r) => ({
             id: r.request_id,
-            peerKey: r.to_anon || "",
+            peerKey: r.to_anon ?? "",
             code: r.code,
-            status: r.status, // pending/accepted/declined
-            createdAtISO: new Date().toISOString(),
-        })),
+            status: r.status,
+            createdAtISO: r.created_at || r.updated_at,
+            })),
         ];
 
-        setRequests(mapped);
+        // 🔒 Deduplicate by request_id
+        const deduped = Array.from(new Map(all.map((r) => [r.id, r])).values());
+
+        setRequests(deduped);
+        } catch (err) {
+        // ✅ Don't crash UI; just log
+        console.error("trust refresh failed:", err);
+        }
     };
 
     useEffect(() => {
         refresh();
         const t = setInterval(refresh, 5000);
         return () => clearInterval(t);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const acceptRequest = async (id: string) => {
@@ -61,6 +80,11 @@ export type TrustRequest = {
 
     const declineRequest = async (id: string) => {
         await respondTrust(id, "declined");
+
+        const req = requests.find(r => r.id === id);
+        if (req) {
+            ensureThread(req.peerKey); 
+        }
         await refresh();
     };
 

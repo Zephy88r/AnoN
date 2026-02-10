@@ -14,7 +14,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// ---- minimal room-based broadcaster (doesn't use ws.Hub/ws.Conn) ----
 
 type room struct {
 	mu    sync.Mutex
@@ -42,14 +41,12 @@ func (r *room) broadcast(sender *websocket.Conn, data []byte) {
 	defer r.mu.Unlock()
 
 	for c := range r.conns {
-		// send to everyone including sender? choose:
-		// - include sender (echo) for easier UI ack
-		// - or skip sender if you want only peer delivery
+		
 		_ = c.WriteMessage(websocket.TextMessage, data)
 	}
 }
 
-var rooms sync.Map // map[string]*room
+var rooms sync.Map 
 
 func roomKey(a, b string) string {
 	p := []string{a, b}

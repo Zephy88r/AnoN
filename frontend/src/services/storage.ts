@@ -51,7 +51,24 @@ export const storage = {
         if (!raw) return fallback;
 
         const parsed = safeParse(raw);
-        if (!parsed || typeof parsed !== "object") return fallback;
+            if (parsed === null || parsed === undefined) return fallback;
+
+            // ✅ If it's a primitive (string/number/bool), allow it (legacy raw JSON path)
+            if (typeof parsed !== "object") {
+            // If migration exists, migrate from version 0
+            if (config?.migrate) {
+                try {
+                const migrated = config.migrate(parsed, 0);
+                storage.setJSON<T>(key, migrated, { version: config.version });
+                return migrated;
+                } catch {
+                return fallback;
+                }
+            }
+
+            return (parsed as T) ?? fallback;
+            }
+
 
         // Envelope path
         const maybeEnv = parsed as Partial<StorageEnvelope<unknown>>;

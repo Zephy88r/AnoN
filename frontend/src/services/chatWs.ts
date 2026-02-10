@@ -1,16 +1,14 @@
-import { getWsTicket } from "./wsApi";
+import { apiFetch } from "./api";
 
-function getWsBaseUrl() {
-  // Convert http://localhost:8080 -> ws://localhost:8080
-    const apiBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
-    return apiBase.replace(/^http/, "ws");
+export async function getWsTicket(peer: string) {
+  return apiFetch<{ ticket: string; expires_in: number }>("/ws/ticket", {
+    method: "POST",
+    body: JSON.stringify({ peer }),
+  });
 }
 
-export async function connectChatWS(peerKey: string) {
-    const { ticket } = await getWsTicket(peerKey);
-
-    const wsUrl = `${getWsBaseUrl()}/ws/chat?ticket=${encodeURIComponent(ticket)}`;
-    const ws = new WebSocket(wsUrl);
-
-    return ws;
+export async function connectChatWS(peer: string) {
+  const { ticket } = await getWsTicket(peer);
+  const ws = new WebSocket(`ws://localhost:8080/ws/chat?ticket=${encodeURIComponent(ticket)}`);
+  return ws;
 }
