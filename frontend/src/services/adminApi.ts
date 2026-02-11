@@ -1,7 +1,7 @@
 import { apiFetch } from "./api";
 import { storage } from "./storage";
 
-const ADMIN_KEY_STORAGE = "admin_key";
+const ADMIN_TOKEN_STORAGE = "admin_token";
 
 export type AdminPost = {
     id: string;
@@ -53,25 +53,36 @@ export type AuditLog = {
     timestamp: string;
 };
 
-export function getAdminKey(): string | null {
-    return storage.getJSON<string | null>(ADMIN_KEY_STORAGE, null);
+export type AdminLoginResponse = {
+    token: string;
+};
+
+export function getAdminToken(): string | null {
+    return storage.getJSON<string | null>(ADMIN_TOKEN_STORAGE, null);
 }
 
-export function setAdminKey(key: string) {
-    storage.setJSON(ADMIN_KEY_STORAGE, key);
+export function setAdminToken(token: string) {
+    storage.setJSON(ADMIN_TOKEN_STORAGE, token);
 }
 
-export function clearAdminKey() {
-    storage.remove(ADMIN_KEY_STORAGE);
+export function clearAdminToken() {
+    storage.remove(ADMIN_TOKEN_STORAGE);
+}
+
+export async function loginAdmin(email: string, password: string) {
+    return apiFetch<AdminLoginResponse>("/admin/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+    }, { auth: false });
 }
 
 async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const key = getAdminKey();
-    if (!key) throw new Error("Admin key required");
+    const token = getAdminToken();
+    if (!token) throw new Error("Admin session required");
 
     const headers: Record<string, string> = {
         ...(options.headers as Record<string, string> | undefined),
-        Authorization: `Bearer ${key}`,
+        Authorization: `Bearer ${token}`,
     };
 
     return apiFetch<T>(`/admin${path}`, { ...options, headers }, { auth: false });

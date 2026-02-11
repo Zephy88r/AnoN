@@ -1,6 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
-    clearAdminKey,
+    ClockIcon,
+    ShieldCheckIcon,
+    ChatBubbleLeftRightIcon,
+    DocumentTextIcon,
+} from "@heroicons/react/24/outline";
+import AdminLayout from "../components/admin/AdminLayout";
+import StatCard from "../components/admin/StatCard";
+import Panel from "../components/admin/Panel";
+import DataTable from "../components/admin/DataTable";
+import SystemHealthPanel from "../components/admin/SystemHealthPanel";
+import {
+    clearAdminToken,
     deleteAdminPost,
     fetchAdminAbuse,
     fetchAdminAudit,
@@ -10,8 +22,7 @@ import {
     fetchAdminStats,
     fetchAdminTrust,
     fetchAdminUsers,
-    getAdminKey,
-    setAdminKey,
+    getAdminToken,
     type AbuseReport,
     type AdminPost,
     type AdminSession,
@@ -21,12 +32,21 @@ import {
     type TrustLink,
 } from "../services/adminApi";
 
-const card =
-    "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-4";
+type AdminPage =
+    | "dashboard"
+    | "sessions"
+    | "users"
+    | "trust"
+    | "link-cards"
+    | "feed"
+    | "map"
+    | "abuse"
+    | "audit";
 
 export default function Admin() {
-    const [adminKeyInput, setAdminKeyInput] = useState(() => getAdminKey() ?? "");
-    const [hasKey, setHasKey] = useState(() => Boolean(getAdminKey()));
+    const navigate = useNavigate();
+    const [hasSession, setHasSession] = useState(() => Boolean(getAdminToken()));
+    const [currentPage, setCurrentPage] = useState<AdminPage>("dashboard");
 
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -83,24 +103,16 @@ export default function Admin() {
     };
 
     useEffect(() => {
-        if (hasKey) {
-            loadAll();
-        }
-    }, [hasKey]);
-
-    const handleSaveKey = () => {
-        const trimmed = adminKeyInput.trim();
-        if (!trimmed) {
-            setError("Admin key is required");
+        if (!hasSession) {
+            navigate("/admin", { replace: true });
             return;
         }
-        setAdminKey(trimmed);
-        setHasKey(true);
-    };
+        loadAll();
+    }, [hasSession, navigate]);
 
     const handleClearKey = () => {
-        clearAdminKey();
-        setHasKey(false);
+        clearAdminToken();
+        setHasSession(false);
         setHealth(null);
         setStats(null);
         setPosts([]);
@@ -109,6 +121,12 @@ export default function Admin() {
         setTrustLinks([]);
         setAbuse([]);
         setAuditLogs([]);
+        setCurrentPage("dashboard");
+        navigate("/admin", { replace: true });
+    };
+
+    const handleNavigate = (page: string) => {
+        setCurrentPage(page as AdminPage);
     };
 
     const handleDeletePost = async (postId: string) => {
@@ -126,340 +144,571 @@ export default function Admin() {
     };
 
     const maskToken = (token: string) => {
-        if (token.length <= 10) return token;
-        return `${token.slice(0, 6)}...${token.slice(-4)}`;
+        if (token.length <= 8) return token;
+        return `${token.slice(0, 4)}...${token.slice(-4)}`;
     };
 
-    return (
-        <div className="mx-auto w-full max-w-5xl space-y-6">
+    const renderDashboard = () => (
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">
+                        Admin Dashboard
+                    </h1>
+                    <p className="text-sm text-slate-700 dark:text-green-300/70">
+                        System overview and key metrics
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    onClick={loadAll}
+                    disabled={!hasSession || isLoading}
+                    className="rounded-xl px-4 py-2 text-sm font-mono border border-emerald-500/30 dark:border-green-500/30
+                        bg-emerald-500/10 dark:bg-green-500/10 text-emerald-800 dark:text-green-300 
+                        hover:bg-emerald-500/20 dark:hover:bg-green-500/20
+                        disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                    {isLoading ? "Loading..." : "Refresh"}
+                </button>
+            </div>
+
+            {error && (
+                <div className="rounded-2xl border border-red-500/20 bg-red-500/10 dark:bg-red-500/10 backdrop-blur p-4">
+                    <p className="text-sm text-red-600 dark:text-red-400 font-mono">{error}</p>
+                </div>
+            )}
+
+            {/* KPI Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard
+                    title="Active Sessions"
+                    value={stats?.total_sessions ?? 0}
+                    icon={ClockIcon}
+                />
+                <StatCard
+                    title="Trust Requests"
+                    value={trustSummary.pending}
+                    icon={ShieldCheckIcon}
+                />
+                <StatCard
+                    title="Total Users"
+                    value={stats?.total_users ?? 0}
+                    icon={ChatBubbleLeftRightIcon}
+                />
+                <StatCard
+                    title="Feed Posts"
+                    value={stats?.total_posts ?? 0}
+                    icon={DocumentTextIcon}
+                />
+            </div>
+
+            {/* Second Row: Chart + Health */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <Panel title="Posts Activity" description="Average posts per day" className="lg:col-span-2">
+                    <div className="h-48 flex items-center justify-center">
+                        <div className="text-center space-y-2">
+                            <p className="text-4xl font-bold text-emerald-600 dark:text-green-400">
+                                {stats?.avg_posts_per_day?.toFixed(1) ?? "0.0"}
+                            </p>
+                            <p className="text-sm text-slate-600 dark:text-green-300/70">
+                                Average posts per day
+                            </p>
+                        </div>
+                    </div>
+                </Panel>
+
+                <SystemHealthPanel health={health || {}} />
+            </div>
+
+            {/* Third Row: Two Tables */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Panel title="Pending Trust Requests">
+                    <DataTable
+                        columns={[
+                            {
+                                key: "from",
+                                label: "From",
+                                render: (t: TrustLink) => (
+                                    <span className="font-mono">{t.from.slice(0, 8)}</span>
+                                ),
+                            },
+                            {
+                                key: "to",
+                                label: "To",
+                                render: (t: TrustLink) => (
+                                    <span className="font-mono">{t.to.slice(0, 8)}</span>
+                                ),
+                            },
+                            {
+                                key: "created_at",
+                                label: "Created",
+                                className: "text-xs",
+                            },
+                        ]}
+                        data={trustLinks.filter((t) => t.status === "pending").slice(0, 5)}
+                        keyExtractor={(t, idx) => `${t.from}-${t.to}-${idx}`}
+                        emptyMessage="No pending trust requests"
+                    />
+                </Panel>
+
+                <Panel title="Recent Sessions">
+                    <DataTable
+                        columns={[
+                            {
+                                key: "anon_id",
+                                label: "Anon ID",
+                                render: (s: AdminSession) => (
+                                    <span className="font-mono">{s.anon_id.slice(0, 8)}</span>
+                                ),
+                            },
+                            {
+                                key: "token",
+                                label: "Token",
+                                render: (s: AdminSession) => (
+                                    <span className="font-mono text-xs">{maskToken(s.token)}</span>
+                                ),
+                            },
+                            {
+                                key: "expires_at",
+                                label: "Expires",
+                                className: "text-xs",
+                            },
+                        ]}
+                        data={sessions.slice(0, 5)}
+                        keyExtractor={(s) => s.token}
+                        emptyMessage="No active sessions"
+                    />
+                </Panel>
+            </div>
+
+            {/* Bottom Row: Recent Posts + Top Posters */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <Panel title="Recent Feed Posts" className="lg:col-span-2">
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                        {posts.slice(0, 8).map((post) => (
+                            <div
+                                key={post.id}
+                                className="rounded-xl border border-emerald-500/10 dark:border-green-500/10 bg-white/50 dark:bg-black/30 p-3"
+                            >
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm text-slate-900 dark:text-green-100 line-clamp-2 mb-1">
+                                            {post.text}
+                                        </p>
+                                        <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-green-300/70">
+                                            <span className="font-mono">{post.anon_id.slice(0, 8)}</span>
+                                            <span>•</span>
+                                            <span>{post.created_at}</span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleDeletePost(post.id)}
+                                        className="shrink-0 rounded-lg px-2 py-1 text-xs border border-red-400/40 text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10"
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                        {posts.length === 0 && (
+                            <p className="text-center py-8 text-slate-500 dark:text-green-300/50">
+                                No posts yet
+                            </p>
+                        )}
+                    </div>
+                </Panel>
+
+                <Panel title="Top Posters">
+                    <div className="space-y-2">
+                        {(stats?.top_posters || []).slice(0, 5).map((poster, idx) => (
+                            <div
+                                key={poster.anon_id}
+                                className="flex items-center justify-between py-2"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <span className="w-6 h-6 rounded-full bg-emerald-500/10 dark:bg-green-500/10 flex items-center justify-center text-xs font-mono text-emerald-700 dark:text-green-400">
+                                        {idx + 1}
+                                    </span>
+                                    <span className="font-mono text-sm text-slate-800 dark:text-green-200">
+                                        {poster.anon_id.slice(0, 8)}
+                                    </span>
+                                </div>
+                                <span className="font-mono text-sm text-emerald-700 dark:text-green-400">
+                                    {poster.post_count}
+                                </span>
+                            </div>
+                        ))}
+                        {(!stats?.top_posters || stats.top_posters.length === 0) && (
+                            <p className="text-center py-4 text-slate-500 dark:text-green-300/50">
+                                No data
+                            </p>
+                        )}
+                    </div>
+                </Panel>
+            </div>
+        </div>
+    );
+
+    const renderSessions = () => (
+        <div className="space-y-6">
             <div>
-                <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Admin Panel</h1>
+                <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Sessions</h1>
                 <p className="text-sm text-slate-700 dark:text-green-300/70">
-                    Moderation, system health, and compliance monitoring
+                    Active user sessions overview
                 </p>
             </div>
 
-            <div className={card}>
-                <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-                    Admin Access
-                </div>
+            <Panel>
+                <DataTable
+                    columns={[
+                        {
+                            key: "anon_id",
+                            label: "Anon ID",
+                            render: (s: AdminSession) => (
+                                <span className="font-mono">{s.anon_id.slice(0, 8)}</span>
+                            ),
+                        },
+                        {
+                            key: "token",
+                            label: "Token",
+                            render: (s: AdminSession) => (
+                                <span className="font-mono">{maskToken(s.token)}</span>
+                            ),
+                        },
+                        {
+                            key: "created_at",
+                            label: "Created",
+                            className: "text-xs",
+                        },
+                        {
+                            key: "expires_at",
+                            label: "Expires",
+                            className: "text-xs",
+                        },
+                    ]}
+                    data={sessions}
+                    keyExtractor={(s) => s.token}
+                    emptyMessage="No sessions recorded"
+                />
+            </Panel>
+        </div>
+    );
 
-                <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
-                    <label className="flex-1">
-                        <div className="text-xs font-mono text-slate-600 dark:text-green-300/70 mb-1">
-                            Admin key
-                        </div>
-                        <input
-                            type="password"
-                            value={adminKeyInput}
-                            onChange={(e) => setAdminKeyInput(e.target.value)}
-                            placeholder="Enter ADMIN_KEY"
-                            className="w-full rounded-xl bg-white/60 dark:bg-black/40 border border-emerald-500/25 dark:border-green-500/25 px-3 py-2 text-sm text-slate-900 dark:text-green-100 outline-none focus:ring-2 focus:ring-emerald-500/30 dark:focus:ring-green-500/30"
-                        />
-                    </label>
-
-                    <div className="flex gap-2">
-                        <button
-                            type="button"
-                            onClick={handleSaveKey}
-                            className="rounded-xl px-4 py-2 text-sm font-mono border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/20 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-300 dark:hover:bg-green-500/20"
-                        >
-                            Save
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleClearKey}
-                            className="rounded-xl px-4 py-2 text-sm font-mono border border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-green-500/20 dark:text-green-300/80 dark:hover:bg-green-500/10"
-                        >
-                            Clear
-                        </button>
-                        <button
-                            type="button"
-                            onClick={loadAll}
-                            disabled={!hasKey || isLoading}
-                            className="rounded-xl px-4 py-2 text-sm font-mono border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-300 dark:hover:bg-green-500/20"
-                        >
-                            Refresh
-                        </button>
-                    </div>
-                </div>
-
-                {error && (
-                    <div className="mt-3 text-sm text-red-600 dark:text-red-400 font-mono">{error}</div>
-                )}
+    const renderTrust = () => (
+        <div className="space-y-6">
+            <div>
+                <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Trust Graph</h1>
+                <p className="text-sm text-slate-700 dark:text-green-300/70">
+                    Trust relationships and requests
+                </p>
             </div>
 
-            {hasKey && (
-                <>
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                        <div className={card}>
-                            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-                                System Health
-                            </div>
-                            <div className="text-sm text-slate-800 dark:text-green-200">
-                                Status: <span className="font-mono">{health?.status ?? "unknown"}</span>
-                            </div>
-                            <div className="text-xs text-slate-600 dark:text-green-300/70 mt-1">
-                                Uptime: {health?.uptime ?? "-"}
-                            </div>
-                            <div className="text-xs text-slate-600 dark:text-green-300/70">
-                                Time: {health?.timestamp ?? "-"}
-                            </div>
-                        </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <StatCard title="Pending" value={trustSummary.pending} />
+                <StatCard title="Accepted" value={trustSummary.accepted} />
+                <StatCard title="Declined" value={trustSummary.declined} />
+            </div>
 
-                        <div className={card}>
-                            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-                                Network Summary
-                            </div>
-                            <div className="grid grid-cols-2 gap-3 text-sm text-slate-800 dark:text-green-200">
-                                <div>Posts: <span className="font-mono">{stats?.total_posts ?? 0}</span></div>
-                                <div>Users: <span className="font-mono">{stats?.total_users ?? 0}</span></div>
-                                <div>Sessions: <span className="font-mono">{stats?.total_sessions ?? 0}</span></div>
-                                <div>Avg/day: <span className="font-mono">{stats?.avg_posts_per_day?.toFixed(1) ?? "0.0"}</span></div>
-                            </div>
-                        </div>
-
-                        <div className={card}>
-                            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-                                Trust Graph Monitor
-                            </div>
-                            <div className="text-sm text-slate-800 dark:text-green-200">
-                                Pending: <span className="font-mono">{trustSummary.pending}</span>
-                            </div>
-                            <div className="text-sm text-slate-800 dark:text-green-200">
-                                Accepted: <span className="font-mono">{trustSummary.accepted}</span>
-                            </div>
-                            <div className="text-sm text-slate-800 dark:text-green-200">
-                                Declined: <span className="font-mono">{trustSummary.declined}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className={card}>
-                        <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-                            Abuse and Rate-Limit Dashboard
-                        </div>
-                        <div className="text-xs text-slate-600 dark:text-green-300/70 mb-2">
-                            Highlights accounts with abnormal posting volume. No IP data is collected.
-                        </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="text-xs text-slate-600 dark:text-green-300/70">
-                                    <tr>
-                                        <th className="text-left py-2">Anon ID</th>
-                                        <th className="text-left py-2">Posts</th>
-                                        <th className="text-left py-2">Last Post</th>
-                                        <th className="text-left py-2">Rate Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="text-slate-800 dark:text-green-200">
-                                    {abuse.slice(0, 20).map((r) => (
-                                        <tr key={r.anon_id} className="border-t border-emerald-500/10 dark:border-green-500/10">
-                                            <td className="py-2 font-mono">{r.anon_id.slice(0, 8)}</td>
-                                            <td className="py-2 font-mono">{r.post_count}</td>
-                                            <td className="py-2">{r.last_post_at || "-"}</td>
-                                            <td className="py-2 font-mono">{r.rate_status}</td>
-                                        </tr>
-                                    ))}
-                                    {abuse.length === 0 && (
-                                        <tr>
-                                            <td colSpan={4} className="py-3 text-slate-500 dark:text-green-300/50">
-                                                No abuse signals detected.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div className={card}>
-                        <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-                            Posts Moderation
-                        </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="text-xs text-slate-600 dark:text-green-300/70">
-                                    <tr>
-                                        <th className="text-left py-2">Post</th>
-                                        <th className="text-left py-2">Anon ID</th>
-                                        <th className="text-left py-2">Created</th>
-                                        <th className="text-left py-2">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="text-slate-800 dark:text-green-200">
-                                    {posts.slice(0, 50).map((p) => (
-                                        <tr key={p.id} className="border-t border-emerald-500/10 dark:border-green-500/10">
-                                            <td className="py-2 max-w-md">
-                                                <div className="text-slate-900 dark:text-green-100 line-clamp-2">{p.text}</div>
-                                            </td>
-                                            <td className="py-2 font-mono">{p.anon_id.slice(0, 8)}</td>
-                                            <td className="py-2 text-xs">{p.created_at}</td>
-                                            <td className="py-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleDeletePost(p.id)}
-                                                    className="rounded-lg px-3 py-1 border border-red-400/40 text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10"
-                                                >
-                                                    Delete
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {posts.length === 0 && (
-                                        <tr>
-                                            <td colSpan={4} className="py-3 text-slate-500 dark:text-green-300/50">
-                                                No posts found.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div className={card}>
-                            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-                                Users Overview
-                            </div>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm">
-                                    <thead className="text-xs text-slate-600 dark:text-green-300/70">
-                                        <tr>
-                                            <th className="text-left py-2">Anon ID</th>
-                                            <th className="text-left py-2">Posts</th>
-                                            <th className="text-left py-2">First Seen</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="text-slate-800 dark:text-green-200">
-                                        {users.slice(0, 20).map((u) => (
-                                            <tr key={u.anon_id} className="border-t border-emerald-500/10 dark:border-green-500/10">
-                                                <td className="py-2 font-mono">{u.anon_id.slice(0, 8)}</td>
-                                                <td className="py-2 font-mono">{u.post_count}</td>
-                                                <td className="py-2 text-xs">{u.created_at}</td>
-                                            </tr>
-                                        ))}
-                                        {users.length === 0 && (
-                                            <tr>
-                                                <td colSpan={3} className="py-3 text-slate-500 dark:text-green-300/50">
-                                                    No users found.
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        <div className={card}>
-                            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-                                Session Overview
-                            </div>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm">
-                                    <thead className="text-xs text-slate-600 dark:text-green-300/70">
-                                        <tr>
-                                            <th className="text-left py-2">Anon ID</th>
-                                            <th className="text-left py-2">Token</th>
-                                            <th className="text-left py-2">Expires</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="text-slate-800 dark:text-green-200">
-                                        {sessions.slice(0, 20).map((s) => (
-                                            <tr key={s.token} className="border-t border-emerald-500/10 dark:border-green-500/10">
-                                                <td className="py-2 font-mono">{s.anon_id.slice(0, 8)}</td>
-                                                <td className="py-2 font-mono">{maskToken(s.token)}</td>
-                                                <td className="py-2 text-xs">{s.expires_at}</td>
-                                            </tr>
-                                        ))}
-                                        {sessions.length === 0 && (
-                                            <tr>
-                                                <td colSpan={3} className="py-3 text-slate-500 dark:text-green-300/50">
-                                                    No sessions recorded.
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className={card}>
-                        <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-                            Trust Graph Links
-                        </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="text-xs text-slate-600 dark:text-green-300/70">
-                                    <tr>
-                                        <th className="text-left py-2">From</th>
-                                        <th className="text-left py-2">To</th>
-                                        <th className="text-left py-2">Status</th>
-                                        <th className="text-left py-2">Created</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="text-slate-800 dark:text-green-200">
-                                    {trustLinks.slice(0, 25).map((t, idx) => (
-                                        <tr key={`${t.from}-${t.to}-${idx}`} className="border-t border-emerald-500/10 dark:border-green-500/10">
-                                            <td className="py-2 font-mono">{t.from.slice(0, 8)}</td>
-                                            <td className="py-2 font-mono">{t.to.slice(0, 8)}</td>
-                                            <td className="py-2 font-mono">{t.status}</td>
-                                            <td className="py-2 text-xs">{t.created_at}</td>
-                                        </tr>
-                                    ))}
-                                    {trustLinks.length === 0 && (
-                                        <tr>
-                                            <td colSpan={4} className="py-3 text-slate-500 dark:text-green-300/50">
-                                                No trust links recorded.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div className={card}>
-                        <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
-                            Audit and Compliance Log
-                        </div>
-                        <div className="text-xs text-slate-600 dark:text-green-300/70 mb-2">
-                            Tracks admin moderation actions for accountability.
-                        </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="text-xs text-slate-600 dark:text-green-300/70">
-                                    <tr>
-                                        <th className="text-left py-2">Action</th>
-                                        <th className="text-left py-2">Actor</th>
-                                        <th className="text-left py-2">Details</th>
-                                        <th className="text-left py-2">Time</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="text-slate-800 dark:text-green-200">
-                                    {auditLogs.slice(0, 50).map((log) => (
-                                        <tr key={log.id} className="border-t border-emerald-500/10 dark:border-green-500/10">
-                                            <td className="py-2 font-mono">{log.action}</td>
-                                            <td className="py-2 font-mono">{log.anon_id}</td>
-                                            <td className="py-2 text-xs">{log.details}</td>
-                                            <td className="py-2 text-xs">{log.timestamp}</td>
-                                        </tr>
-                                    ))}
-                                    {auditLogs.length === 0 && (
-                                        <tr>
-                                            <td colSpan={4} className="py-3 text-slate-500 dark:text-green-300/50">
-                                                No audit events recorded.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </>
-            )}
+            <Panel>
+                <DataTable
+                    columns={[
+                        {
+                            key: "from",
+                            label: "From",
+                            render: (t: TrustLink) => (
+                                <span className="font-mono">{t.from.slice(0, 8)}</span>
+                            ),
+                        },
+                        {
+                            key: "to",
+                            label: "To",
+                            render: (t: TrustLink) => (
+                                <span className="font-mono">{t.to.slice(0, 8)}</span>
+                            ),
+                        },
+                        {
+                            key: "status",
+                            label: "Status",
+                            render: (t: TrustLink) => (
+                                <span
+                                    className={`inline-flex px-2 py-1 rounded-lg text-xs font-mono ${
+                                        t.status === "accepted"
+                                            ? "bg-emerald-500/15 text-emerald-700 dark:bg-green-500/15 dark:text-green-300"
+                                            : t.status === "pending"
+                                              ? "bg-yellow-500/15 text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-300"
+                                              : "bg-red-500/15 text-red-700 dark:bg-red-500/15 dark:text-red-300"
+                                    }`}
+                                >
+                                    {t.status}
+                                </span>
+                            ),
+                        },
+                        {
+                            key: "created_at",
+                            label: "Created",
+                            className: "text-xs",
+                        },
+                    ]}
+                    data={trustLinks}
+                    keyExtractor={(t, idx) => `${t.from}-${t.to}-${idx}`}
+                    emptyMessage="No trust links recorded"
+                />
+            </Panel>
         </div>
+    );
+
+    const renderFeed = () => (
+        <div className="space-y-6">
+            <div>
+                <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Feed Posts</h1>
+                <p className="text-sm text-slate-700 dark:text-green-300/70">
+                    Moderation and post management
+                </p>
+            </div>
+
+            <Panel>
+                <DataTable
+                    columns={[
+                        {
+                            key: "text",
+                            label: "Post",
+                            render: (p: AdminPost) => (
+                                <div className="max-w-md">
+                                    <p className="text-slate-900 dark:text-green-100 line-clamp-2">{p.text}</p>
+                                </div>
+                            ),
+                        },
+                        {
+                            key: "anon_id",
+                            label: "Anon ID",
+                            render: (p: AdminPost) => (
+                                <span className="font-mono">{p.anon_id.slice(0, 8)}</span>
+                            ),
+                        },
+                        {
+                            key: "created_at",
+                            label: "Created",
+                            className: "text-xs",
+                        },
+                        {
+                            key: "actions",
+                            label: "Actions",
+                            render: (p: AdminPost) => (
+                                <button
+                                    type="button"
+                                    onClick={() => handleDeletePost(p.id)}
+                                    className="rounded-lg px-3 py-1 text-xs border border-red-400/40 text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10"
+                                >
+                                    Delete
+                                </button>
+                            ),
+                        },
+                    ]}
+                    data={posts}
+                    keyExtractor={(p) => p.id}
+                    emptyMessage="No posts found"
+                />
+            </Panel>
+        </div>
+    );
+
+    const renderAbuse = () => (
+        <div className="space-y-6">
+            <div>
+                <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Abuse Monitor</h1>
+                <p className="text-sm text-slate-700 dark:text-green-300/70">
+                    Rate limiting and abuse detection
+                </p>
+            </div>
+
+            <Panel description="Highlights accounts with abnormal posting volume. No IP data is collected.">
+                <DataTable
+                    columns={[
+                        {
+                            key: "anon_id",
+                            label: "Anon ID",
+                            render: (r: AbuseReport) => (
+                                <span className="font-mono">{r.anon_id.slice(0, 8)}</span>
+                            ),
+                        },
+                        {
+                            key: "post_count",
+                            label: "Posts",
+                            render: (r: AbuseReport) => (
+                                <span className="font-mono">{r.post_count}</span>
+                            ),
+                        },
+                        {
+                            key: "last_post_at",
+                            label: "Last Post",
+                            render: (r: AbuseReport) => r.last_post_at || "-",
+                        },
+                        {
+                            key: "rate_status",
+                            label: "Rate Status",
+                            render: (r: AbuseReport) => (
+                                <span className="font-mono">{r.rate_status}</span>
+                            ),
+                        },
+                    ]}
+                    data={abuse}
+                    keyExtractor={(r) => r.anon_id}
+                    emptyMessage="No abuse signals detected"
+                />
+            </Panel>
+        </div>
+    );
+
+    const renderAudit = () => (
+        <div className="space-y-6">
+            <div>
+                <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Audit Log</h1>
+                <p className="text-sm text-slate-700 dark:text-green-300/70">
+                    Admin actions and compliance tracking
+                </p>
+            </div>
+
+            <Panel description="Tracks admin moderation actions for accountability">
+                <DataTable
+                    columns={[
+                        {
+                            key: "action",
+                            label: "Action",
+                            render: (log: AuditLog) => (
+                                <span className="font-mono">{log.action}</span>
+                            ),
+                        },
+                        {
+                            key: "anon_id",
+                            label: "Actor",
+                            render: (log: AuditLog) => (
+                                <span className="font-mono">{log.anon_id}</span>
+                            ),
+                        },
+                        {
+                            key: "details",
+                            label: "Details",
+                            className: "text-xs max-w-xs truncate",
+                        },
+                        {
+                            key: "timestamp",
+                            label: "Time",
+                            className: "text-xs",
+                        },
+                    ]}
+                    data={auditLogs}
+                    keyExtractor={(log) => log.id}
+                    emptyMessage="No audit events recorded"
+                />
+            </Panel>
+        </div>
+    );
+
+    const renderUsers = () => (
+        <div className="space-y-6">
+            <div>
+                <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Users</h1>
+                <p className="text-sm text-slate-700 dark:text-green-300/70">
+                    User accounts overview
+                </p>
+            </div>
+
+            <Panel>
+                <DataTable
+                    columns={[
+                        {
+                            key: "anon_id",
+                            label: "Anon ID",
+                            render: (u: AdminUser) => (
+                                <span className="font-mono">{u.anon_id.slice(0, 8)}</span>
+                            ),
+                        },
+                        {
+                            key: "post_count",
+                            label: "Posts",
+                            render: (u: AdminUser) => (
+                                <span className="font-mono">{u.post_count}</span>
+                            ),
+                        },
+                        {
+                            key: "created_at",
+                            label: "First Seen",
+                            className: "text-xs",
+                        },
+                    ]}
+                    data={users}
+                    keyExtractor={(u) => u.anon_id}
+                    emptyMessage="No users found"
+                />
+            </Panel>
+        </div>
+    );
+
+    const renderPlaceholder = (title: string) => (
+        <div className="space-y-6">
+            <div>
+                <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">{title}</h1>
+                <p className="text-sm text-slate-700 dark:text-green-300/70">
+                    Coming soon
+                </p>
+            </div>
+            <Panel>
+                <div className="py-12 text-center text-slate-500 dark:text-green-300/50">
+                    This section is under development
+                </div>
+            </Panel>
+        </div>
+    );
+
+    const renderContent = () => {
+        if (!hasSession) {
+            return null;
+        }
+
+        if (isLoading && !stats) {
+            return (
+                <div className="flex items-center justify-center py-20">
+                    <div className="text-center">
+                        <div className="w-12 h-12 rounded-full border-4 border-emerald-500/20 dark:border-green-500/20 border-t-emerald-500 dark:border-t-green-500 animate-spin mx-auto mb-4" />
+                        <p className="text-slate-600 dark:text-green-300/70">Loading admin data...</p>
+                    </div>
+                </div>
+            );
+        }
+
+        switch (currentPage) {
+            case "dashboard":
+                return renderDashboard();
+            case "sessions":
+                return renderSessions();
+            case "users":
+                return renderUsers();
+            case "trust":
+                return renderTrust();
+            case "feed":
+                return renderFeed();
+            case "abuse":
+                return renderAbuse();
+            case "audit":
+                return renderAudit();
+            case "link-cards":
+                return renderPlaceholder("Link Cards");
+            case "map":
+                return renderPlaceholder("Map Pings");
+            default:
+                return renderDashboard();
+        }
+    };
+
+    return (
+        <AdminLayout 
+            currentPage={currentPage} 
+            onNavigate={handleNavigate}
+            onLogout={handleClearKey}
+        >
+            {renderContent()}
+        </AdminLayout>
     );
 }

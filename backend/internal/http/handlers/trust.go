@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -31,7 +32,8 @@ func TrustRequest(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
-		card, ok := store.DefaultStore().GetCard(req.Code)
+		st := store.DefaultStore()
+		card, ok := st.GetCard(req.Code)
 		if !ok {
 			http.Error(w, "code not found", http.StatusNotFound)
 			return
@@ -61,7 +63,16 @@ func TrustRequest(cfg config.Config) http.HandlerFunc {
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
-		store.DefaultStore().PutTrust(tr)
+		if err := st.PutCard(card); err != nil {
+			log.Printf("persist trust card update: failed: %v", err)
+			http.Error(w, "failed to persist trust card", http.StatusInternalServerError)
+			return
+		}
+		if err := st.PutTrust(tr); err != nil {
+			log.Printf("persist trust request: failed: %v", err)
+			http.Error(w, "failed to persist trust request", http.StatusInternalServerError)
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(types.TrustRequestOut{
@@ -90,7 +101,8 @@ func TrustRespond(cfg config.Config) http.HandlerFunc {
 			return
 		}
 
-		tr, ok := store.DefaultStore().GetTrust(req.RequestID)
+		st := store.DefaultStore()
+		tr, ok := st.GetTrust(req.RequestID)
 		if !ok {
 			http.Error(w, "trust request not found", http.StatusNotFound)
 			return
@@ -112,6 +124,12 @@ func TrustRespond(cfg config.Config) http.HandlerFunc {
 			tr.Status = store.TrustAccepted
 		} else {
 			tr.Status = store.TrustDeclined
+		}
+
+		if err := st.PutTrust(tr); err != nil {
+			log.Printf("persist trust response: failed: %v", err)
+			http.Error(w, "failed to persist trust response", http.StatusInternalServerError)
+			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")

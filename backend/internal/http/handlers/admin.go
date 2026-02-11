@@ -3,9 +3,11 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"anon-backend/internal/config"
+	"anon-backend/internal/security"
 	"anon-backend/internal/store"
 )
 
@@ -48,7 +50,46 @@ type AbuseReport struct {
 	RateStatus string `json:"rate_status"` // "normal", "warning", "blocked"
 }
 
+type AdminLoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type AdminLoginResponse struct {
+	Token string `json:"token"`
+}
+
 // ============ ADMIN ENDPOINTS ============
+
+func AdminLogin(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req AdminLoginRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+
+		email := strings.TrimSpace(req.Email)
+		if email != cfg.AdminEmail || req.Password != cfg.AdminPass {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		token, err := security.SignAdminJWT(cfg.JWTSecret, cfg.JWTTTL, email)
+		if err != nil {
+			http.Error(w, "failed to sign admin token", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(AdminLoginResponse{Token: token})
+	}
+}
 
 func AdminGetPosts(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

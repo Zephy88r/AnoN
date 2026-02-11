@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -32,12 +33,20 @@ func SessionBootstrap(cfg config.Config) http.HandlerFunc {
 		}
 
 		now := time.Now()
-		store.DefaultStore().PutSession(store.SessionInfo{
+		err = store.DefaultStore().PutSession(store.SessionInfo{
+			ID:        "",
 			AnonID:    anonID,
 			Token:     token,
+			IssuedAt:  now,
 			ExpiresAt: now.Add(cfg.JWTTTL),
 			CreatedAt: now,
 		})
+		if err != nil {
+			log.Printf("persist session: failed: %v", err)
+			http.Error(w, "failed to persist session", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("persist session: ok")
 
 		resp := types.BootstrapResponse{
 			Token:  token,

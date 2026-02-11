@@ -13,6 +13,7 @@ import Messages from "./pages/Messages";
 import ChatThread from "./pages/ChatThread";
 import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
+import AdminLogin from "./pages/AdminLogin";
 
 import RequireTrust from "./components/RequireTrust";
 import { bootstrapSession } from "./services/session";
@@ -54,6 +55,8 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route path="/admin" element={<AdminLogin />} />
+        <Route path="/admin/panel" element={<Admin />} />
 
         <Route path="/app" element={<PageShell />}>
           <Route index element={<Navigate to="feed" replace />} />
@@ -71,7 +74,6 @@ export default function App() {
             }
           />
           <Route path="settings" element={<Settings />} />
-          <Route path="admin" element={<Admin />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

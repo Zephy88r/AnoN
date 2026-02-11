@@ -1,7 +1,9 @@
 package store
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"time"
 )
@@ -21,25 +23,39 @@ var _ Store = (*PgStore)(nil)
 
 // ===== LINK CARDS =====
 
-func (s *PgStore) PutCard(c *LinkCard) {
-	query := `
-		INSERT INTO link_cards (code, owner_anon, status, created_at, expires_at, used_by)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (code) DO UPDATE SET
-			status = $3, used_by = $6, updated_at = CURRENT_TIMESTAMP
-	`
-	_, err := s.db.Exec(query, c.Code, c.OwnerAnon, c.Status, c.CreatedAt, c.ExpiresAt, c.UsedBy)
-	if err != nil {
-		fmt.Printf("error putting card: %v\n", err)
+func (s *PgStore) PutCard(c *LinkCard) error {
+	if c.ID == "" {
+		id, err := newUUID()
+		if err != nil {
+			return fmt.Errorf("generate link card id: %w", err)
+		}
+		c.ID = id
 	}
+
+	query := `
+		INSERT INTO link_cards (id, code, owner_anon, status, created_at, expires_at, used_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (code) DO UPDATE SET
+			status = EXCLUDED.status,
+			expires_at = EXCLUDED.expires_at,
+			used_by = EXCLUDED.used_by
+	`
+	_, err := s.db.Exec(query, c.ID, c.Code, c.OwnerAnon, c.Status, c.CreatedAt, c.ExpiresAt, c.UsedBy)
+	if err != nil {
+		return fmt.Errorf("put link card: %w", err)
+	}
+	return nil
 }
 
 func (s *PgStore) GetCard(code string) (*LinkCard, bool) {
-	query := `SELECT code, owner_anon, status, created_at, expires_at, used_by FROM link_cards WHERE code = $1`
+	query := `SELECT id, code, owner_anon, status, created_at, expires_at, used_by FROM link_cards WHERE code = $1`
 	row := s.db.QueryRow(query, code)
 
 	card := &LinkCard{}
-	err := row.Scan(&card.Code, &card.OwnerAnon, &card.Status, &card.CreatedAt, &card.ExpiresAt, &card.UsedBy)
+	var status sql.NullString
+	var expiresAt sql.NullTime
+	var usedBy sql.NullString
+	err := row.Scan(&card.ID, &card.Code, &card.OwnerAnon, &status, &card.CreatedAt, &expiresAt, &usedBy)
 	if err == sql.ErrNoRows {
 		return nil, false
 	}
@@ -47,11 +63,20 @@ func (s *PgStore) GetCard(code string) (*LinkCard, bool) {
 		fmt.Printf("error getting card: %v\n", err)
 		return nil, false
 	}
+	if status.Valid {
+		card.Status = LinkCardStatus(status.String)
+	}
+	if expiresAt.Valid {
+		card.ExpiresAt = expiresAt.Time
+	}
+	if usedBy.Valid {
+		card.UsedBy = usedBy.String
+	}
 	return card, true
 }
 
 func (s *PgStore) CardsByOwner(owner string) []*LinkCard {
-	query := `SELECT code, owner_anon, status, created_at, expires_at, used_by FROM link_cards WHERE owner_anon = $1 ORDER BY created_at DESC`
+	query := `SELECT id, code, owner_anon, status, created_at, expires_at, used_by FROM link_cards WHERE owner_anon = $1 ORDER BY created_at DESC`
 	rows, err := s.db.Query(query, owner)
 	if err != nil {
 		fmt.Printf("error querying cards: %v\n", err)
@@ -62,9 +87,21 @@ func (s *PgStore) CardsByOwner(owner string) []*LinkCard {
 	out := []*LinkCard{}
 	for rows.Next() {
 		card := &LinkCard{}
-		if err := rows.Scan(&card.Code, &card.OwnerAnon, &card.Status, &card.CreatedAt, &card.ExpiresAt, &card.UsedBy); err != nil {
+		var status sql.NullString
+		var expiresAt sql.NullTime
+		var usedBy sql.NullString
+		if err := rows.Scan(&card.ID, &card.Code, &card.OwnerAnon, &status, &card.CreatedAt, &expiresAt, &usedBy); err != nil {
 			fmt.Printf("error scanning card: %v\n", err)
 			continue
+		}
+		if status.Valid {
+			card.Status = LinkCardStatus(status.String)
+		}
+		if expiresAt.Valid {
+			card.ExpiresAt = expiresAt.Time
+		}
+		if usedBy.Valid {
+			card.UsedBy = usedBy.String
 		}
 		out = append(out, card)
 	}
@@ -73,7 +110,7 @@ func (s *PgStore) CardsByOwner(owner string) []*LinkCard {
 
 // ===== TRUST REQUESTS =====
 
-func (s *PgStore) PutTrust(t *TrustRequest) {
+func (s *PgStore) PutTrust(t *TrustRequest) error {
 	query := `
 		INSERT INTO trust_requests (id, code, from_anon, to_anon, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -82,8 +119,9 @@ func (s *PgStore) PutTrust(t *TrustRequest) {
 	`
 	_, err := s.db.Exec(query, t.ID, t.Code, t.FromAnon, t.ToAnon, t.Status, t.CreatedAt, t.UpdatedAt)
 	if err != nil {
-		fmt.Printf("error putting trust: %v\n", err)
+		return fmt.Errorf("put trust request: %w", err)
 	}
+	return nil
 }
 
 func (s *PgStore) GetTrust(id string) (*TrustRequest, bool) {
@@ -288,7 +326,17 @@ func (s *PgStore) GetAllUsers() []*UserInfo {
 }
 
 func (s *PgStore) GetAllSessions() []*SessionInfo {
-	query := `SELECT anon_id, token, expires_at, created_at FROM sessions ORDER BY created_at DESC`
+	query := `
+		SELECT
+			COALESCE(id::text, ''),
+			anon_id,
+			COALESCE(token, ''),
+			expires_at,
+			COALESCE(issued_at, created_at),
+			COALESCE(created_at, issued_at)
+		FROM sessions
+		ORDER BY created_at DESC
+	`
 
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -300,7 +348,7 @@ func (s *PgStore) GetAllSessions() []*SessionInfo {
 	out := []*SessionInfo{}
 	for rows.Next() {
 		s := &SessionInfo{}
-		if err := rows.Scan(&s.AnonID, &s.Token, &s.ExpiresAt, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.AnonID, &s.Token, &s.ExpiresAt, &s.IssuedAt, &s.CreatedAt); err != nil {
 			fmt.Printf("error scanning session: %v\n", err)
 			continue
 		}
@@ -309,17 +357,51 @@ func (s *PgStore) GetAllSessions() []*SessionInfo {
 	return out
 }
 
-func (s *PgStore) PutSession(session SessionInfo) {
-	query := `
-		INSERT INTO sessions (token, anon_id, created_at, expires_at)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (token) DO UPDATE SET
-			expires_at = $4
-	`
-	_, err := s.db.Exec(query, session.Token, session.AnonID, session.CreatedAt, session.ExpiresAt)
-	if err != nil {
-		fmt.Printf("error putting session: %v\n", err)
+func (s *PgStore) PutSession(session SessionInfo) error {
+	issuedAt := session.IssuedAt
+	if issuedAt.IsZero() {
+		issuedAt = session.CreatedAt
+		if issuedAt.IsZero() {
+			issuedAt = time.Now()
+		}
 	}
+
+	createdAt := session.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = issuedAt
+	}
+
+	if session.ID == "" {
+		id, err := newUUID()
+		if err != nil {
+			return fmt.Errorf("generate session id: %w", err)
+		}
+		session.ID = id
+	}
+
+	query := `
+		INSERT INTO sessions (id, anon_id, issued_at, expires_at, token, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	_, err := s.db.Exec(query, session.ID, session.AnonID, issuedAt, session.ExpiresAt, session.Token, createdAt)
+	if err != nil {
+		return fmt.Errorf("put session: %w", err)
+	}
+	return nil
+}
+
+func newUUID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+
+	// RFC 4122 variant and version (4)
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+
+	encoded := hex.EncodeToString(b)
+	return fmt.Sprintf("%s-%s-%s-%s-%s", encoded[0:8], encoded[8:12], encoded[12:16], encoded[16:20], encoded[20:32]), nil
 }
 
 func (s *PgStore) GetAllTrustRequests() []*TrustRequest {

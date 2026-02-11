@@ -67,7 +67,8 @@ func NewRouter(cfg config.Config) http.Handler {
 		pr.With(SessionAuth(cfg)).Get("/feed", handlers.PostFeed(cfg))
 	})
 
-	// Admin routes (protected by ADMIN_KEY)
+	// Admin routes (protected by admin session token)
+	r.Post("/admin/login", handlers.AdminLogin(cfg))
 	r.Route("/admin", func(ar chi.Router) {
 		ar.Use(AdminAuth(cfg))
 		ar.Get("/posts", handlers.AdminGetPosts(cfg))

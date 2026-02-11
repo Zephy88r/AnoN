@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -43,7 +44,12 @@ func LinkCardCreate(cfg config.Config) http.HandlerFunc {
 			ExpiresAt: now.Add(time.Duration(ttlMin) * time.Minute),
 		}
 
-		store.DefaultStore().PutCard(card)
+		if err := store.DefaultStore().PutCard(card); err != nil {
+			log.Printf("persist link card: failed: %v", err)
+			http.Error(w, "failed to persist link card", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("persist link card: ok")
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(types.LinkCardDTO{

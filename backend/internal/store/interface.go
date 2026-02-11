@@ -5,12 +5,12 @@ import "time"
 // Store is the interface all storage backends must implement.
 type Store interface {
 	// Link Cards
-	PutCard(c *LinkCard)
+	PutCard(c *LinkCard) error
 	GetCard(code string) (*LinkCard, bool)
 	CardsByOwner(owner string) []*LinkCard
 
 	// Trust Requests
-	PutTrust(t *TrustRequest)
+	PutTrust(t *TrustRequest) error
 	GetTrust(id string) (*TrustRequest, bool)
 	TrustForAnon(anon string) []*TrustRequest
 	TrustAccepted(a, b string) bool
@@ -31,7 +31,7 @@ type Store interface {
 	GetAuditLogs() []AuditLog
 	DeletePost(postID string) error
 	LogAuditEvent(event AuditLog)
-	PutSession(session SessionInfo)
+	PutSession(session SessionInfo) error
 }
 
 // Admin types
@@ -42,8 +42,10 @@ type UserInfo struct {
 }
 
 type SessionInfo struct {
+	ID        string
 	AnonID    string
 	Token     string
+	IssuedAt  time.Time
 	ExpiresAt time.Time
 	CreatedAt time.Time
 }

@@ -23,6 +23,7 @@ const (
 )
 
 type LinkCard struct {
+	ID        string
 	Code      string
 	OwnerAnon string
 	Status    LinkCardStatus
@@ -78,10 +79,11 @@ func NewMemStore() *MemStore {
 	}
 }
 
-func (s *MemStore) PutCard(c *LinkCard) {
+func (s *MemStore) PutCard(c *LinkCard) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cards[c.Code] = c
+	return nil
 }
 
 func (s *MemStore) GetCard(code string) (*LinkCard, bool) {
@@ -103,10 +105,11 @@ func (s *MemStore) CardsByOwner(owner string) []*LinkCard {
 	return out
 }
 
-func (s *MemStore) PutTrust(t *TrustRequest) {
+func (s *MemStore) PutTrust(t *TrustRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.trust[t.ID] = t
+	return nil
 }
 
 func (s *MemStore) GetTrust(id string) (*TrustRequest, bool) {
@@ -368,12 +371,13 @@ func (s *MemStore) GetAllSessions() []*SessionInfo {
 	return sessions
 }
 
-func (s *MemStore) PutSession(session SessionInfo) {
+func (s *MemStore) PutSession(session SessionInfo) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	copy := session
 	s.sessions[session.Token] = &copy
+	return nil
 }
 
 func (s *MemStore) GetAllTrustRequests() []*TrustRequest {
