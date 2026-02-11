@@ -11,6 +11,7 @@ import StatCard from "../components/admin/StatCard";
 import Panel from "../components/admin/Panel";
 import DataTable from "../components/admin/DataTable";
 import SystemHealthPanel from "../components/admin/SystemHealthPanel";
+import { formatAdminTime } from "../utils/formatTime";
 import {
     clearAdminToken,
     deleteAdminPost,
@@ -244,6 +245,9 @@ export default function Admin() {
                                 key: "created_at",
                                 label: "Created",
                                 className: "text-xs",
+                                render: (t: TrustLink) => (
+                                    <span>{formatAdminTime(t.created_at)}</span>
+                                ),
                             },
                         ]}
                         data={trustLinks.filter((t) => t.status === "pending").slice(0, 5)}
@@ -273,6 +277,9 @@ export default function Admin() {
                                 key: "expires_at",
                                 label: "Expires",
                                 className: "text-xs",
+                                render: (s: AdminSession) => (
+                                    <span>{formatAdminTime(s.expires_at)}</span>
+                                ),
                             },
                         ]}
                         data={sessions.slice(0, 5)}
@@ -299,7 +306,7 @@ export default function Admin() {
                                         <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-green-300/70">
                                             <span className="font-mono">{post.anon_id.slice(0, 8)}</span>
                                             <span>•</span>
-                                            <span>{post.created_at}</span>
+                                            <span>{formatAdminTime(post.created_at)}</span>
                                         </div>
                                     </div>
                                     <button
@@ -381,11 +388,17 @@ export default function Admin() {
                             key: "created_at",
                             label: "Created",
                             className: "text-xs",
+                            render: (s: AdminSession) => (
+                                <span>{formatAdminTime(s.created_at)}</span>
+                            ),
                         },
                         {
                             key: "expires_at",
                             label: "Expires",
                             className: "text-xs",
+                            render: (s: AdminSession) => (
+                                <span>{formatAdminTime(s.expires_at)}</span>
+                            ),
                         },
                     ]}
                     data={sessions}
@@ -449,6 +462,9 @@ export default function Admin() {
                             key: "created_at",
                             label: "Created",
                             className: "text-xs",
+                            render: (t: TrustLink) => (
+                                <span>{formatAdminTime(t.created_at)}</span>
+                            ),
                         },
                     ]}
                     data={trustLinks}
@@ -491,6 +507,9 @@ export default function Admin() {
                             key: "created_at",
                             label: "Created",
                             className: "text-xs",
+                            render: (p: AdminPost) => (
+                                <span>{formatAdminTime(p.created_at)}</span>
+                            ),
                         },
                         {
                             key: "actions",
@@ -543,7 +562,7 @@ export default function Admin() {
                         {
                             key: "last_post_at",
                             label: "Last Post",
-                            render: (r: AbuseReport) => r.last_post_at || "-",
+                            render: (r: AbuseReport) => r.last_post_at ? formatAdminTime(r.last_post_at) : "-",
                         },
                         {
                             key: "rate_status",
@@ -596,6 +615,9 @@ export default function Admin() {
                             key: "timestamp",
                             label: "Time",
                             className: "text-xs",
+                            render: (log: AuditLog) => (
+                                <span>{formatAdminTime(log.timestamp)}</span>
+                            ),
                         },
                     ]}
                     data={auditLogs}
@@ -636,6 +658,9 @@ export default function Admin() {
                             key: "created_at",
                             label: "First Seen",
                             className: "text-xs",
+                            render: (u: AdminUser) => (
+                                <span>{formatAdminTime(u.created_at)}</span>
+                            ),
                         },
                     ]}
                     data={users}
