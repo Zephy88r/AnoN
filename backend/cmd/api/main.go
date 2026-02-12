@@ -11,10 +11,16 @@ import (
 	httpx "anon-backend/internal/http"
 	"anon-backend/internal/store"
 
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
 func main() {
+	// Load .env file if it exists
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using environment variables")
+	}
+
 	cfg := config.Load()
 
 	// Initialize database if DATABASE_URL is provided

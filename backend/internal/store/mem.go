@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -47,6 +48,43 @@ type Post struct {
 	AnonID    string
 	Text      string
 	CreatedAt time.Time
+	Likes     int
+	Dislikes  int
+	Deleted   bool
+}
+
+type PostReaction struct {
+	PostID       string
+	AnonID       string
+	ReactionType string // "like" or "dislike"
+	CreatedAt    time.Time
+}
+
+type PostComment struct {
+	ID        string
+	PostID    string
+	AnonID    string
+	Text      string
+	CreatedAt time.Time
+	Likes     int
+	Dislikes  int
+	Deleted   bool
+}
+
+type CommentReaction struct {
+	CommentID    string
+	AnonID       string
+	ReactionType string // "like" or "dislike"
+	CreatedAt    time.Time
+}
+
+type CommentReply struct {
+	ID        string
+	CommentID string
+	AnonID    string
+	Text      string
+	CreatedAt time.Time
+	Deleted   bool
 }
 
 type GeoPing struct {
@@ -57,25 +95,33 @@ type GeoPing struct {
 }
 
 type MemStore struct {
-	mu        sync.RWMutex
-	cards     map[string]*LinkCard      // code -> card
-	trust     map[string]*TrustRequest  // id -> trust req
-	posts     []*Post                   // all posts, newest first
-	pings     map[string]*GeoPing       // anon -> last ping
-	postDays  map[string]map[string]int // anon -> date (YYYY-MM-DD) -> count
-	auditLogs []AuditLog                // all audit logs
-	sessions  map[string]*SessionInfo   // token -> session
+	mu             sync.RWMutex
+	cards          map[string]*LinkCard                   // code -> card
+	trust          map[string]*TrustRequest               // id -> trust req
+	posts          []*Post                                // all posts, newest first
+	pings          map[string]*GeoPing                    // anon -> last ping
+	postDays       map[string]map[string]int              // anon -> date (YYYY-MM-DD) -> count
+	auditLogs      []AuditLog                             // all audit logs
+	sessions       map[string]*SessionInfo                // token -> session
+	postReactions  map[string]map[string]*PostReaction    // postID -> anonID -> reaction
+	postComments   map[string][]*PostComment              // postID -> comments
+	commentReacts  map[string]map[string]*CommentReaction // commentID -> anonID -> reaction
+	commentReplies map[string][]*CommentReply             // commentID -> replies
 }
 
 func NewMemStore() *MemStore {
 	return &MemStore{
-		cards:     make(map[string]*LinkCard),
-		trust:     make(map[string]*TrustRequest),
-		posts:     make([]*Post, 0),
-		pings:     make(map[string]*GeoPing),
-		postDays:  make(map[string]map[string]int),
-		auditLogs: make([]AuditLog, 0),
-		sessions:  make(map[string]*SessionInfo),
+		cards:          make(map[string]*LinkCard),
+		trust:          make(map[string]*TrustRequest),
+		posts:          make([]*Post, 0),
+		pings:          make(map[string]*GeoPing),
+		postDays:       make(map[string]map[string]int),
+		auditLogs:      make([]AuditLog, 0),
+		sessions:       make(map[string]*SessionInfo),
+		postReactions:  make(map[string]map[string]*PostReaction),
+		postComments:   make(map[string][]*PostComment),
+		commentReacts:  make(map[string]map[string]*CommentReaction),
+		commentReplies: make(map[string][]*CommentReply),
 	}
 }
 
@@ -141,15 +187,20 @@ func (s *MemStore) PutPost(p *Post) {
 	s.posts = append([]*Post{p}, s.posts...)
 }
 
-// GetFeed returns up to limit posts, newest first.
+// GetFeed returns up to limit posts, newest first, excluding deleted posts.
 func (s *MemStore) GetFeed(limit int) []*Post {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if limit <= 0 || limit > len(s.posts) {
-		limit = len(s.posts)
+
+	out := make([]*Post, 0, limit)
+	for _, p := range s.posts {
+		if !p.Deleted {
+			out = append(out, p)
+			if len(out) >= limit {
+				break
+			}
+		}
 	}
-	out := make([]*Post, limit)
-	copy(out, s.posts[:limit])
 	return out
 }
 
@@ -173,6 +224,24 @@ func (s *MemStore) CanCreatePost(anonID string) bool {
 
 	s.postDays[anonID][dateKey] = count + 1
 	return true
+}
+
+func (s *MemStore) GetRemainingPosts(anonID string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	dateKey := time.Now().Format("2006-01-02")
+
+	if _, exists := s.postDays[anonID]; !exists {
+		return 3
+	}
+
+	count := s.postDays[anonID][dateKey]
+	remaining := 3 - count
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 // PutGeo stores the last ping for an anon.
@@ -415,4 +484,394 @@ func (s *MemStore) LogAuditEvent(event AuditLog) {
 	defer s.mu.Unlock()
 	event.Timestamp = time.Now()
 	s.auditLogs = append(s.auditLogs, event)
+}
+
+// GetPost retrieves a post by ID
+func (s *MemStore) GetPost(postID string) (*Post, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, p := range s.posts {
+		if p.ID == postID {
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+// DeletePostByUser marks a post as deleted if the user is the author
+func (s *MemStore) DeletePostByUser(postID, anonID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, p := range s.posts {
+		if p.ID == postID {
+			if p.AnonID != anonID {
+				return fmt.Errorf("unauthorized: not post author")
+			}
+			p.Deleted = true
+			return nil
+		}
+	}
+	return fmt.Errorf("post not found")
+}
+
+// ReactToPost adds or updates a user's reaction to a post
+func (s *MemStore) ReactToPost(postID, anonID, reactionType string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Find the post
+	var post *Post
+	for _, p := range s.posts {
+		if p.ID == postID {
+			post = p
+			break
+		}
+	}
+
+	if post == nil {
+		return fmt.Errorf("post not found")
+	}
+
+	if post.Deleted {
+		return fmt.Errorf("post is deleted")
+	}
+
+	// Initialize reaction map for post if needed
+	if s.postReactions[postID] == nil {
+		s.postReactions[postID] = make(map[string]*PostReaction)
+	}
+
+	// Get existing reaction
+	existingReaction := s.postReactions[postID][anonID]
+
+	// If same reaction, remove it (toggle off)
+	if existingReaction != nil && existingReaction.ReactionType == reactionType {
+		// Decrement counter
+		if reactionType == "like" {
+			post.Likes--
+		} else if reactionType == "dislike" {
+			post.Dislikes--
+		}
+		delete(s.postReactions[postID], anonID)
+		return nil
+	}
+
+	// If different reaction, update counters
+	if existingReaction != nil {
+		if existingReaction.ReactionType == "like" {
+			post.Likes--
+		} else if existingReaction.ReactionType == "dislike" {
+			post.Dislikes--
+		}
+	}
+
+	// Add new reaction
+	if reactionType == "like" {
+		post.Likes++
+	} else if reactionType == "dislike" {
+		post.Dislikes++
+	}
+
+	s.postReactions[postID][anonID] = &PostReaction{
+		PostID:       postID,
+		AnonID:       anonID,
+		ReactionType: reactionType,
+		CreatedAt:    time.Now(),
+	}
+
+	return nil
+}
+
+// GetPostReaction retrieves a user's reaction to a post
+func (s *MemStore) GetPostReaction(postID, anonID string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.postReactions[postID] == nil {
+		return "", false
+	}
+
+	reaction, ok := s.postReactions[postID][anonID]
+	if !ok {
+		return "", false
+	}
+
+	return reaction.ReactionType, true
+}
+
+// AddComment adds a comment to a post
+func (s *MemStore) AddComment(comment *PostComment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Verify post exists
+	postExists := false
+	for _, p := range s.posts {
+		if p.ID == comment.PostID && !p.Deleted {
+			postExists = true
+			break
+		}
+	}
+
+	if !postExists {
+		return fmt.Errorf("post not found or deleted")
+	}
+
+	if s.postComments[comment.PostID] == nil {
+		s.postComments[comment.PostID] = make([]*PostComment, 0)
+	}
+
+	s.postComments[comment.PostID] = append(s.postComments[comment.PostID], comment)
+	return nil
+}
+
+// GetComments retrieves all non-deleted comments for a post
+func (s *MemStore) GetComments(postID string) []*PostComment {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	comments := s.postComments[postID]
+	if comments == nil {
+		return []*PostComment{}
+	}
+
+	result := make([]*PostComment, 0)
+	for _, c := range comments {
+		if !c.Deleted {
+			result = append(result, c)
+		}
+	}
+
+	return result
+}
+
+// GetComment retrieves a comment by ID
+func (s *MemStore) GetComment(commentID string) (*PostComment, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, comments := range s.postComments {
+		for _, c := range comments {
+			if c.ID == commentID {
+				return c, true
+			}
+		}
+	}
+
+	return nil, false
+}
+
+// DeleteCommentByUser soft-deletes a comment if user is the author
+func (s *MemStore) DeleteCommentByUser(commentID, anonID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, comments := range s.postComments {
+		for _, c := range comments {
+			if c.ID == commentID {
+				if c.AnonID != anonID {
+					return fmt.Errorf("unauthorized: not comment author")
+				}
+				c.Deleted = true
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("comment not found")
+}
+
+// ReactToComment adds or updates a user's reaction to a comment
+func (s *MemStore) ReactToComment(commentID, anonID, reactionType string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var comment *PostComment
+	for _, comments := range s.postComments {
+		for _, c := range comments {
+			if c.ID == commentID {
+				comment = c
+				break
+			}
+		}
+		if comment != nil {
+			break
+		}
+	}
+
+	if comment == nil {
+		return fmt.Errorf("comment not found")
+	}
+
+	if comment.Deleted {
+		return fmt.Errorf("comment is deleted")
+	}
+
+	if s.commentReacts[commentID] == nil {
+		s.commentReacts[commentID] = make(map[string]*CommentReaction)
+	}
+
+	existingReaction := s.commentReacts[commentID][anonID]
+
+	if existingReaction != nil && existingReaction.ReactionType == reactionType {
+		if reactionType == "like" {
+			comment.Likes--
+		} else if reactionType == "dislike" {
+			comment.Dislikes--
+		}
+		delete(s.commentReacts[commentID], anonID)
+		return nil
+	}
+
+	if existingReaction != nil {
+		if existingReaction.ReactionType == "like" {
+			comment.Likes--
+		} else if existingReaction.ReactionType == "dislike" {
+			comment.Dislikes--
+		}
+	}
+
+	if reactionType == "like" {
+		comment.Likes++
+	} else if reactionType == "dislike" {
+		comment.Dislikes++
+	}
+
+	s.commentReacts[commentID][anonID] = &CommentReaction{
+		CommentID:    commentID,
+		AnonID:       anonID,
+		ReactionType: reactionType,
+		CreatedAt:    time.Now(),
+	}
+
+	return nil
+}
+
+// GetCommentReaction retrieves a user's reaction to a comment
+func (s *MemStore) GetCommentReaction(commentID, anonID string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.commentReacts[commentID] == nil {
+		return "", false
+	}
+
+	reaction, ok := s.commentReacts[commentID][anonID]
+	if !ok {
+		return "", false
+	}
+
+	return reaction.ReactionType, true
+}
+
+// AddCommentReply adds a reply to a comment
+func (s *MemStore) AddCommentReply(reply *CommentReply) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	commentExists := false
+	for _, comments := range s.postComments {
+		for _, c := range comments {
+			if c.ID == reply.CommentID && !c.Deleted {
+				commentExists = true
+				break
+			}
+		}
+		if commentExists {
+			break
+		}
+	}
+
+	if !commentExists {
+		return fmt.Errorf("comment not found or deleted")
+	}
+
+	if s.commentReplies[reply.CommentID] == nil {
+		s.commentReplies[reply.CommentID] = make([]*CommentReply, 0)
+	}
+
+	s.commentReplies[reply.CommentID] = append(s.commentReplies[reply.CommentID], reply)
+	return nil
+}
+
+// GetCommentReplies retrieves all non-deleted replies for a comment
+func (s *MemStore) GetCommentReplies(commentID string) []*CommentReply {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	replies := s.commentReplies[commentID]
+	if replies == nil {
+		return []*CommentReply{}
+	}
+
+	result := make([]*CommentReply, 0)
+	for _, r := range replies {
+		if !r.Deleted {
+			result = append(result, r)
+		}
+	}
+
+	return result
+}
+
+// DeleteCommentReplyByUser soft-deletes a reply if user is the author
+func (s *MemStore) DeleteCommentReplyByUser(replyID, anonID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, replies := range s.commentReplies {
+		for _, r := range replies {
+			if r.ID == replyID {
+				if r.AnonID != anonID {
+					return fmt.Errorf("unauthorized: not reply author")
+				}
+				r.Deleted = true
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("reply not found")
+}
+
+// GetCommentRepliesCount returns count of non-deleted replies for a comment
+func (s *MemStore) GetCommentRepliesCount(commentID string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	replies := s.commentReplies[commentID]
+	if replies == nil {
+		return 0
+	}
+
+	count := 0
+	for _, r := range replies {
+		if !r.Deleted {
+			count++
+		}
+	}
+
+	return count
+}
+
+// GetCommentsCount returns count of non-deleted comments for a post
+func (s *MemStore) GetCommentsCount(postID string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	comments := s.postComments[postID]
+	if comments == nil {
+		return 0
+	}
+
+	count := 0
+	for _, c := range comments {
+		if !c.Deleted {
+			count++
+		}
+	}
+
+	return count
 }

@@ -61,16 +61,29 @@ func PostCreate(cfg config.Config) http.HandlerFunc {
 			AnonID:    claims.AnonID,
 			Text:      text,
 			CreatedAt: now,
+			Likes:     0,
+			Dislikes:  0,
+			Deleted:   false,
 		}
 
 		store.DefaultStore().PutPost(post)
 
+		// Get remaining posts count
+		remainingPosts := store.DefaultStore().GetRemainingPosts(claims.AnonID)
+
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(types.PostDTO{
-			ID:        post.ID,
-			AnonID:    post.AnonID,
-			Text:      post.Text,
-			CreatedAt: post.CreatedAt.Format(time.RFC3339),
+		_ = json.NewEncoder(w).Encode(types.PostCreateResponse{
+			Post: types.PostDTO{
+				ID:           post.ID,
+				AnonID:       post.AnonID,
+				Text:         post.Text,
+				CreatedAt:    post.CreatedAt.Format(time.RFC3339),
+				Likes:        post.Likes,
+				Dislikes:     post.Dislikes,
+				UserReaction: "", // New post, no reaction yet
+				Deleted:      post.Deleted,
+			},
+			PostsRemaining: remainingPosts,
 		})
 	}
 }
@@ -88,15 +101,165 @@ func PostFeed(cfg config.Config) http.HandlerFunc {
 		out := make([]types.PostDTO, len(posts))
 
 		for i, post := range posts {
+			// Get user's reaction to this post
+			userReaction, _ := store.DefaultStore().GetPostReaction(post.ID, claims.AnonID)
+
 			out[i] = types.PostDTO{
-				ID:        post.ID,
-				AnonID:    post.AnonID,
-				Text:      post.Text,
-				CreatedAt: post.CreatedAt.Format(time.RFC3339),
+				ID:           post.ID,
+				AnonID:       post.AnonID,
+				Text:         post.Text,
+				CreatedAt:    post.CreatedAt.Format(time.RFC3339),
+				Likes:        post.Likes,
+				Dislikes:     post.Dislikes,
+				UserReaction: userReaction,
+				Deleted:      post.Deleted,
 			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(types.PostFeedResponse{Posts: out})
+	}
+}
+
+func PostRemainingCount(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims := httpctx.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, "no claims", http.StatusUnauthorized)
+			return
+		}
+
+		remaining := store.DefaultStore().GetRemainingPosts(claims.AnonID)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]int{"remaining": remaining})
+	}
+}
+
+func PostDelete(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims := httpctx.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, "no claims", http.StatusUnauthorized)
+			return
+		}
+
+		var req types.PostDeleteRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+
+		if req.PostID == "" {
+			http.Error(w, "post_id required", http.StatusBadRequest)
+			return
+		}
+
+		err := store.DefaultStore().DeletePostByUser(req.PostID, claims.AnonID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+	}
+}
+
+func PostLike(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims := httpctx.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, "no claims", http.StatusUnauthorized)
+			return
+		}
+
+		var req types.PostReactionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+
+		if req.PostID == "" {
+			http.Error(w, "post_id required", http.StatusBadRequest)
+			return
+		}
+
+		err := store.DefaultStore().ReactToPost(req.PostID, claims.AnonID, "like")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Get updated post
+		post, found := store.DefaultStore().GetPost(req.PostID)
+		if !found {
+			http.Error(w, "post not found", http.StatusNotFound)
+			return
+		}
+
+		// Get user's reaction
+		userReaction, _ := store.DefaultStore().GetPostReaction(req.PostID, claims.AnonID)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.PostDTO{
+			ID:           post.ID,
+			AnonID:       post.AnonID,
+			Text:         post.Text,
+			CreatedAt:    post.CreatedAt.Format(time.RFC3339),
+			Likes:        post.Likes,
+			Dislikes:     post.Dislikes,
+			UserReaction: userReaction,
+			Deleted:      post.Deleted,
+		})
+	}
+}
+
+func PostDislike(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims := httpctx.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, "no claims", http.StatusUnauthorized)
+			return
+		}
+
+		var req types.PostReactionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+
+		if req.PostID == "" {
+			http.Error(w, "post_id required", http.StatusBadRequest)
+			return
+		}
+
+		err := store.DefaultStore().ReactToPost(req.PostID, claims.AnonID, "dislike")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Get updated post
+		post, found := store.DefaultStore().GetPost(req.PostID)
+		if !found {
+			http.Error(w, "post not found", http.StatusNotFound)
+			return
+		}
+
+		// Get user's reaction
+		userReaction, _ := store.DefaultStore().GetPostReaction(req.PostID, claims.AnonID)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.PostDTO{
+			ID:           post.ID,
+			AnonID:       post.AnonID,
+			Text:         post.Text,
+			CreatedAt:    post.CreatedAt.Format(time.RFC3339),
+			Likes:        post.Likes,
+			Dislikes:     post.Dislikes,
+			UserReaction: userReaction,
+			Deleted:      post.Deleted,
+		})
 	}
 }

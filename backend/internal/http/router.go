@@ -65,6 +65,20 @@ func NewRouter(cfg config.Config) http.Handler {
 	r.Route("/posts", func(pr chi.Router) {
 		pr.With(SessionAuth(cfg)).Post("/create", handlers.PostCreate(cfg))
 		pr.With(SessionAuth(cfg)).Get("/feed", handlers.PostFeed(cfg))
+		pr.With(SessionAuth(cfg)).Get("/remaining", handlers.PostRemainingCount(cfg))
+		pr.With(SessionAuth(cfg)).Post("/delete", handlers.PostDelete(cfg))
+		pr.With(SessionAuth(cfg)).Post("/like", handlers.PostLike(cfg))
+		pr.With(SessionAuth(cfg)).Post("/dislike", handlers.PostDislike(cfg))
+
+		// Comments
+		pr.With(SessionAuth(cfg)).Post("/comments/create", handlers.CommentCreate(cfg))
+		pr.With(SessionAuth(cfg)).Get("/comments", handlers.CommentGet(cfg))
+		pr.With(SessionAuth(cfg)).Post("/comments/delete", handlers.CommentDelete(cfg))
+		pr.With(SessionAuth(cfg)).Post("/comments/like", handlers.CommentLike(cfg))
+		pr.With(SessionAuth(cfg)).Post("/comments/dislike", handlers.CommentDislike(cfg))
+		pr.With(SessionAuth(cfg)).Post("/comments/replies/create", handlers.CommentReplyCreate(cfg))
+		pr.With(SessionAuth(cfg)).Get("/comments/replies", handlers.CommentReplyGet(cfg))
+		pr.With(SessionAuth(cfg)).Post("/comments/replies/delete", handlers.CommentReplyDelete(cfg))
 	})
 
 	// Admin routes (protected by admin session token)

@@ -3,8 +3,9 @@ import { useNavigate } from "react-router-dom";
 import TrustRequestModal from "../components/TrustRequestModal";
 import { useTrust } from "../contexts/TrustContext";
 import { ensureThreadForPeer } from "../services/thread";
-import { createPost, fetchFeed } from "../services/postsApi";
-import type { ApiPost } from "../services/postsApi";
+import { createPost, fetchFeed, deletePost, likePost, dislikePost, getRemainingPosts, createComment, getComments, deleteComment, likeComment, dislikeComment, createCommentReply, getCommentReplies, deleteCommentReply } from "../services/postsApi";
+import type { ApiPost, ApiComment, ApiCommentReply } from "../services/postsApi";
+import { getMyAnonId } from "../services/session";
 
 export default function HomeFeed() {
     const navigate = useNavigate();
@@ -15,6 +16,18 @@ export default function HomeFeed() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [postsLeftToday, setPostsLeftToday] = useState(3);
+    const [myAnonId, setMyAnonId] = useState<string | null>(null);
+
+    // Comment state
+    const [commentText, setCommentText] = useState<Record<string, string>>({});
+    const [showComments, setShowComments] = useState<Record<string, boolean>>({});
+    const [comments, setComments] = useState<Record<string, ApiComment[]>>({});
+    const [loadingComments, setLoadingComments] = useState<Record<string, boolean>>({});
+    const [commentSort, setCommentSort] = useState<Record<string, 'newest' | 'oldest'>>({});
+    const [replyText, setReplyText] = useState<Record<string, string>>({});
+    const [showReplies, setShowReplies] = useState<Record<string, boolean>>({});
+    const [replies, setReplies] = useState<Record<string, ApiCommentReply[]>>({});
+    const [loadingReplies, setLoadingReplies] = useState<Record<string, boolean>>({});
 
     // TrustContext is the single source of truth (persists via localStorage)
     const { getStatusForUser } = useTrust();
@@ -23,19 +36,29 @@ export default function HomeFeed() {
     const [trustOpen, setTrustOpen] = useState(false);
     const [pendingPostId, setPendingPostId] = useState<string | null>(null);
 
-    // Load posts on mount
+    // Load my anon ID on mount
     useEffect(() => {
-        const loadPosts = async () => {
+        const id = getMyAnonId();
+        setMyAnonId(id);
+    }, []);
+
+    // Load posts and remaining count on mount
+    useEffect(() => {
+        const loadData = async () => {
             try {
-                const result = await fetchFeed();
-                setPosts(result.posts);
+                const [feedResult, remainingResult] = await Promise.all([
+                    fetchFeed(),
+                    getRemainingPosts()
+                ]);
+                setPosts(feedResult.posts);
+                setPostsLeftToday(remainingResult.remaining);
             } catch (err) {
                 console.error("Failed to load feed:", err);
             } finally {
                 setIsLoading(false);
             }
         };
-        loadPosts();
+        loadData();
     }, []);
 
     const handlePostSubmit = async () => {
@@ -58,11 +81,11 @@ export default function HomeFeed() {
 
         setIsSubmitting(true);
         try {
-            const newPost = await createPost(trimmedText);
+            const response = await createPost(trimmedText);
             // Add new post to the top of the feed
-            setPosts([newPost, ...posts]);
+            setPosts([response.post, ...posts]);
             setPostText("");
-            setPostsLeftToday(postsLeftToday - 1);
+            setPostsLeftToday(response.posts_remaining);
         } catch (err) {
             console.error("Post creation failed:", err);
             const errorMessage = err instanceof Error ? err.message : "Error creating post";
@@ -88,6 +111,216 @@ export default function HomeFeed() {
         // Trust request would be implemented here
         console.log("Trust request for post:", _postId);
         closeTrustModal();
+    };
+
+    const handleDeletePost = async (postId: string) => {
+        if (!confirm("Are you sure you want to delete this post?")) {
+            return;
+        }
+
+        try {
+            await deletePost(postId);
+            // Remove post from UI
+            setPosts(posts.filter(p => p.id !== postId));
+        } catch (err) {
+            console.error("Failed to delete post:", err);
+            alert("Failed to delete post. You can only delete your own posts.");
+        }
+    };
+
+    const handleLikePost = async (postId: string) => {
+        try {
+            const updatedPost = await likePost(postId);
+            // Update post in UI
+            setPosts(posts.map(p => p.id === postId ? updatedPost : p));
+        } catch (err) {
+            console.error("Failed to like post:", err);
+            const errorMessage = err instanceof Error ? err.message : "Failed to like post";
+            alert(errorMessage);
+        }
+    };
+
+    const handleDislikePost = async (postId: string) => {
+        try {
+            const updatedPost = await dislikePost(postId);
+            // Update post in UI
+            setPosts(posts.map(p => p.id === postId ? updatedPost : p));
+        } catch (err) {
+            console.error("Failed to dislike post:", err);
+            const errorMessage = err instanceof Error ? err.message : "Failed to dislike post";
+            alert(errorMessage);
+        }
+    };
+
+    const toggleComments = async (postId: string) => {
+        const isCurrentlyShowing = showComments[postId];
+        
+        if (!isCurrentlyShowing) {
+            // Load comments if not already loaded
+            if (!comments[postId]) {
+                setLoadingComments({ ...loadingComments, [postId]: true });
+                try {
+                    const result = await getComments(postId);
+                    setComments({ ...comments, [postId]: result.comments });
+                } catch (err) {
+                    console.error("Failed to load comments:", err);
+                } finally {
+                    setLoadingComments({ ...loadingComments, [postId]: false });
+                }
+            }
+        }
+        
+        setShowComments({ ...showComments, [postId]: !isCurrentlyShowing });
+    };
+
+    const handleSubmitComment = async (postId: string) => {
+        const text = commentText[postId]?.trim();
+        if (!text) return;
+
+        try {
+            const newComment = await createComment(postId, text);
+            // Add comment to UI
+            setComments({
+                ...comments,
+                [postId]: [...(comments[postId] || []), newComment]
+            });
+            // Update comment count on post
+            setPosts(posts.map(p => 
+                p.id === postId 
+                    ? { ...p, comments_count: p.comments_count + 1 }
+                    : p
+            ));
+            // Clear input
+            setCommentText({ ...commentText, [postId]: "" });
+        } catch (err) {
+            console.error("Failed to create comment:", err);
+            alert("Failed to create comment");
+        }
+    };
+
+    const handleDeleteComment = async (postId: string, commentId: string) => {
+        if (!confirm("Are you sure you want to delete this comment?")) {
+            return;
+        }
+
+        try {
+            await deleteComment(commentId);
+            // Remove comment from UI
+            setComments({
+                ...comments,
+                [postId]: comments[postId].filter(c => c.id !== commentId)
+            });
+            // Update comment count on post
+            setPosts(posts.map(p => 
+                p.id === postId 
+                    ? { ...p, comments_count: Math.max(0, p.comments_count - 1) }
+                    : p
+            ));
+        } catch (err) {
+            console.error("Failed to delete comment:", err);
+            alert("Failed to delete comment. You can only delete your own comments.");
+        }
+    };
+
+    const handleLikeComment = async (postId: string, commentId: string) => {
+        try {
+            const updatedComment = await likeComment(commentId);
+            setComments({
+                ...comments,
+                [postId]: (comments[postId] || []).map(c => c.id === commentId ? updatedComment : c)
+            });
+        } catch (err) {
+            console.error("Failed to like comment:", err);
+            const errorMessage = err instanceof Error ? err.message : "Failed to like comment";
+            alert(errorMessage);
+        }
+    };
+
+    const handleDislikeComment = async (postId: string, commentId: string) => {
+        try {
+            const updatedComment = await dislikeComment(commentId);
+            setComments({
+                ...comments,
+                [postId]: (comments[postId] || []).map(c => c.id === commentId ? updatedComment : c)
+            });
+        } catch (err) {
+            console.error("Failed to dislike comment:", err);
+            const errorMessage = err instanceof Error ? err.message : "Failed to dislike comment";
+            alert(errorMessage);
+        }
+    };
+
+    const toggleReplies = async (commentId: string) => {
+        const isCurrentlyShowing = showReplies[commentId];
+
+        if (!isCurrentlyShowing) {
+            if (!replies[commentId]) {
+                setLoadingReplies({ ...loadingReplies, [commentId]: true });
+                try {
+                    const result = await getCommentReplies(commentId);
+                    setReplies({ ...replies, [commentId]: result.replies });
+                } catch (err) {
+                    console.error("Failed to load replies:", err);
+                } finally {
+                    setLoadingReplies({ ...loadingReplies, [commentId]: false });
+                }
+            }
+        }
+
+        setShowReplies({ ...showReplies, [commentId]: !isCurrentlyShowing });
+    };
+
+    const handleSubmitReply = async (postId: string, commentId: string) => {
+        const text = replyText[commentId]?.trim();
+        if (!text) return;
+
+        try {
+            const newReply = await createCommentReply(commentId, text);
+            setReplies({
+                ...replies,
+                [commentId]: [...(replies[commentId] || []), newReply]
+            });
+            setComments({
+                ...comments,
+                [postId]: (comments[postId] || []).map(c =>
+                    c.id === commentId
+                        ? { ...c, replies_count: c.replies_count + 1 }
+                        : c
+                )
+            });
+            setReplyText({ ...replyText, [commentId]: "" });
+            setShowReplies({ ...showReplies, [commentId]: true });
+        } catch (err) {
+            console.error("Failed to create reply:", err);
+            const errorMessage = err instanceof Error ? err.message : "Failed to create reply";
+            alert(errorMessage);
+        }
+    };
+
+    const handleDeleteReply = async (postId: string, commentId: string, replyId: string) => {
+        if (!confirm("Are you sure you want to delete this reply?")) {
+            return;
+        }
+
+        try {
+            await deleteCommentReply(replyId);
+            setReplies({
+                ...replies,
+                [commentId]: (replies[commentId] || []).filter(r => r.id !== replyId)
+            });
+            setComments({
+                ...comments,
+                [postId]: (comments[postId] || []).map(c =>
+                    c.id === commentId
+                        ? { ...c, replies_count: Math.max(0, c.replies_count - 1) }
+                        : c
+                )
+            });
+        } catch (err) {
+            console.error("Failed to delete reply:", err);
+            const errorMessage = err instanceof Error ? err.message : "Failed to delete reply";
+            alert(errorMessage);
+        }
     };
 
     return (
@@ -209,6 +442,263 @@ export default function HomeFeed() {
                 <p className="text-slate-800 dark:text-green-100 leading-relaxed">
                     {post.text}
                 </p>
+
+                {/* Like/Dislike Section */}
+                <div className="mt-3 flex items-center gap-4 text-sm">
+                    {/* Like Button */}
+                    <button
+                        type="button"
+                        onClick={() => handleLikePost(post.id)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+                            post.user_reaction === "like"
+                                ? "bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold"
+                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                        }`}
+                    >
+                        <svg
+                            className="w-5 h-5"
+                            fill={post.user_reaction === "like" ? "currentColor" : "none"}
+                            stroke="currentColor"
+                            strokeWidth={post.user_reaction === "like" ? "0" : "2"}
+                            viewBox="0 0 24 24"
+                        >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                        </svg>
+                        <span className="font-mono">{post.likes}</span>
+                    </button>
+
+                    {/* Dislike Button */}
+                    <button
+                        type="button"
+                        onClick={() => handleDislikePost(post.id)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+                            post.user_reaction === "dislike"
+                                ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-semibold"
+                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                        }`}
+                    >
+                        <svg
+                            className="w-5 h-5 rotate-180"
+                            fill={post.user_reaction === "dislike" ? "currentColor" : "none"}
+                            stroke="currentColor"
+                            strokeWidth={post.user_reaction === "dislike" ? "0" : "2"}
+                            viewBox="0 0 24 24"
+                        >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                        </svg>
+                        <span className="font-mono">{post.dislikes}</span>
+                    </button>
+
+                    {/* Delete Button - only show for own posts */}
+                    {myAnonId && post.anon_id === myAnonId && (
+                        <button
+                            type="button"
+                            onClick={() => handleDeletePost(post.id)}
+                            className="ml-auto text-slate-400 dark:text-green-300/50 hover:text-red-600 dark:hover:text-red-400 transition"
+                        >
+                            🗑️ delete
+                        </button>
+                    )}
+                </div>
+
+                {/* Comment Toggle Button */}
+                <div className="mt-3">
+                    <button
+                        type="button"
+                        onClick={() => toggleComments(post.id)}
+                        className="text-sm text-slate-500 dark:text-green-300/60 hover:text-slate-700 dark:hover:text-green-300 font-mono transition"
+                    >
+                        {showComments[post.id] ? '▼' : '▶'} {post.comments_count} comment{post.comments_count !== 1 ? 's' : ''}
+                    </button>
+                </div>
+
+                {/* Comments Section */}
+                {showComments[post.id] && (
+                    <div className="mt-3 border-t border-slate-200 dark:border-green-300/20 pt-3">
+                        {/* Comment Input */}
+                        <div className="flex gap-2 mb-3">
+                            <input
+                                type="text"
+                                value={commentText[post.id] || ""}
+                                onChange={(e) => setCommentText({ ...commentText, [post.id]: e.target.value })}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleSubmitComment(post.id);
+                                    }
+                                }}
+                                placeholder="Write a comment..."
+                                maxLength={500}
+                                className="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-green-300/30 bg-white dark:bg-black text-slate-800 dark:text-green-300 placeholder-slate-400 dark:placeholder-green-300/40 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-green-300/50"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => handleSubmitComment(post.id)}
+                                disabled={!commentText[post.id]?.trim()}
+                                className="px-4 py-2 text-sm font-mono rounded-lg bg-emerald-500 dark:bg-green-300/10 text-white dark:text-green-300 hover:bg-emerald-600 dark:hover:bg-green-300/20 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                            >
+                                Post
+                            </button>
+                        </div>
+
+                        {/* Comment Filter */}
+                        {(comments[post.id] || []).length > 0 && (
+                            <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-200 dark:border-green-300/10">
+                                <span className="text-xs font-mono text-slate-500 dark:text-green-300/60">
+                                    {comments[post.id].length} comment{comments[post.id].length !== 1 ? 's' : ''}
+                                </span>
+                                <div className="relative">
+                                    <select
+                                        value={commentSort[post.id] || 'newest'}
+                                        onChange={(e) => setCommentSort({ ...commentSort, [post.id]: e.target.value as 'newest' | 'oldest' })}
+                                        className="px-3 py-1 text-xs font-mono rounded-lg border border-slate-300 dark:border-green-300/30 bg-white dark:bg-black text-slate-700 dark:text-green-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-green-300/50 cursor-pointer"
+                                    >
+                                        <option value="newest">Newest First</option>
+                                        <option value="oldest">Oldest First</option>
+                                    </select>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Comments List */}
+                        {loadingComments[post.id] ? (
+                            <div className="text-sm text-slate-400 dark:text-green-300/50 font-mono">Loading comments...</div>
+                        ) : (
+                            <div className="space-y-2">
+                                {(comments[post.id] || [])
+                                    .sort((a, b) => {
+                                        const sortOrder = commentSort[post.id] || 'newest';
+                                        const dateA = new Date(a.created_at).getTime();
+                                        const dateB = new Date(b.created_at).getTime();
+                                        return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
+                                    })
+                                    .map((comment) => (
+                                    <div
+                                        key={comment.id}
+                                        className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-green-300/10"
+                                    >
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="flex-1">
+                                                <div className="text-xs font-mono text-slate-500 dark:text-green-300/60 mb-1">
+                                                    User #{comment.anon_id.substring(0, 8)} • {timeAgo(comment.created_at)}
+                                                </div>
+                                                <div className="text-sm text-slate-800 dark:text-green-300 break-words">
+                                                    {comment.text}
+                                                </div>
+                                                <div className="mt-2 flex items-center gap-2 text-xs">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleLikeComment(post.id, comment.id)}
+                                                        className={`flex items-center gap-1 px-2 py-1 rounded-md transition ${
+                                                            comment.user_reaction === "like"
+                                                                ? "bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold"
+                                                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                                        }`}
+                                                    >
+                                                        <span>👍</span>
+                                                        <span className="font-mono">{comment.likes}</span>
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDislikeComment(post.id, comment.id)}
+                                                        className={`flex items-center gap-1 px-2 py-1 rounded-md transition ${
+                                                            comment.user_reaction === "dislike"
+                                                                ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-semibold"
+                                                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                                        }`}
+                                                    >
+                                                        <span>👎</span>
+                                                        <span className="font-mono">{comment.dislikes}</span>
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleReplies(comment.id)}
+                                                        className="ml-2 text-slate-500 dark:text-green-300/60 hover:text-slate-700 dark:hover:text-green-300 font-mono transition"
+                                                    >
+                                                        {showReplies[comment.id] ? "Hide" : "Reply"}
+                                                        {comment.replies_count > 0 ? ` (${comment.replies_count})` : ""}
+                                                    </button>
+                                                </div>
+
+                                                {showReplies[comment.id] && (
+                                                    <div className="mt-3 pl-3 border-l border-slate-200 dark:border-green-300/20">
+                                                        <div className="flex gap-2 mb-2">
+                                                            <input
+                                                                type="text"
+                                                                value={replyText[comment.id] || ""}
+                                                                onChange={(e) => setReplyText({ ...replyText, [comment.id]: e.target.value })}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === "Enter" && !e.shiftKey) {
+                                                                        e.preventDefault();
+                                                                        handleSubmitReply(post.id, comment.id);
+                                                                    }
+                                                                }}
+                                                                placeholder="Write a reply..."
+                                                                maxLength={500}
+                                                                className="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-green-300/30 bg-white dark:bg-black text-slate-800 dark:text-green-300 placeholder-slate-400 dark:placeholder-green-300/40 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-green-300/50"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleSubmitReply(post.id, comment.id)}
+                                                                disabled={!replyText[comment.id]?.trim()}
+                                                                className="px-3 py-2 text-xs font-mono rounded-lg bg-emerald-500 dark:bg-green-300/10 text-white dark:text-green-300 hover:bg-emerald-600 dark:hover:bg-green-300/20 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                                                            >
+                                                                Reply
+                                                            </button>
+                                                        </div>
+
+                                                        {loadingReplies[comment.id] ? (
+                                                            <div className="text-xs text-slate-400 dark:text-green-300/50 font-mono">Loading replies...</div>
+                                                        ) : (
+                                                            <div className="space-y-2">
+                                                                {(replies[comment.id] || []).map((reply) => (
+                                                                    <div
+                                                                        key={reply.id}
+                                                                        className="p-2 rounded-lg bg-white dark:bg-black border border-slate-200 dark:border-green-300/10"
+                                                                    >
+                                                                        <div className="flex items-start justify-between gap-2">
+                                                                            <div className="flex-1">
+                                                                                <div className="text-[11px] font-mono text-slate-500 dark:text-green-300/60 mb-1">
+                                                                                    User #{reply.anon_id.substring(0, 8)} • {timeAgo(reply.created_at)}
+                                                                                </div>
+                                                                                <div className="text-xs text-slate-800 dark:text-green-300 break-words">
+                                                                                    {reply.text}
+                                                                                </div>
+                                                                            </div>
+                                                                            {myAnonId && reply.anon_id === myAnonId && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleDeleteReply(post.id, comment.id, reply.id)}
+                                                                                    className="text-slate-400 dark:text-green-300/50 hover:text-red-600 dark:hover:text-red-400 text-[11px] transition"
+                                                                                >
+                                                                                    🗑️
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {/* Delete button - only show for own comments */}
+                                            {myAnonId && comment.anon_id === myAnonId && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleDeleteComment(post.id, comment.id)}
+                                                    className="text-slate-400 dark:text-green-300/50 hover:text-red-600 dark:hover:text-red-400 text-xs transition"
+                                                >
+                                                    🗑️
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* Actions */}
                 <div className="mt-3 flex flex-wrap gap-3 text-xs font-mono">

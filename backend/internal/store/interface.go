@@ -19,6 +19,24 @@ type Store interface {
 	PutPost(p *Post)
 	GetFeed(limit int) []*Post
 	CanCreatePost(anonID string) bool
+	GetRemainingPosts(anonID string) int
+	DeletePostByUser(postID, anonID string) error
+	ReactToPost(postID, anonID, reactionType string) error
+	GetPostReaction(postID, anonID string) (string, bool)
+	GetPost(postID string) (*Post, bool)
+
+	// Comments
+	AddComment(comment *PostComment) error
+	GetComments(postID string) []*PostComment
+	GetComment(commentID string) (*PostComment, bool)
+	DeleteCommentByUser(commentID, anonID string) error
+	GetCommentsCount(postID string) int
+	ReactToComment(commentID, anonID, reactionType string) error
+	GetCommentReaction(commentID, anonID string) (string, bool)
+	AddCommentReply(reply *CommentReply) error
+	GetCommentReplies(commentID string) []*CommentReply
+	DeleteCommentReplyByUser(replyID, anonID string) error
+	GetCommentRepliesCount(commentID string) int
 
 	// Geo Pings
 	PutGeo(ping *GeoPing)
