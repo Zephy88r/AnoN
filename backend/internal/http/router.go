@@ -65,6 +65,7 @@ func NewRouter(cfg config.Config) http.Handler {
 	r.Route("/posts", func(pr chi.Router) {
 		pr.With(SessionAuth(cfg)).Post("/create", handlers.PostCreate(cfg))
 		pr.With(SessionAuth(cfg)).Get("/feed", handlers.PostFeed(cfg))
+		pr.With(SessionAuth(cfg)).Get("/search", handlers.PostSearch(cfg))
 		pr.With(SessionAuth(cfg)).Get("/remaining", handlers.PostRemainingCount(cfg))
 		pr.With(SessionAuth(cfg)).Post("/delete", handlers.PostDelete(cfg))
 		pr.With(SessionAuth(cfg)).Post("/like", handlers.PostLike(cfg))

@@ -1,14 +1,15 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import TrustRequestModal from "../components/TrustRequestModal";
 import { useTrust } from "../contexts/TrustContext";
 import { ensureThreadForPeer } from "../services/thread";
-import { createPost, fetchFeed, deletePost, likePost, dislikePost, getRemainingPosts, createComment, getComments, deleteComment, likeComment, dislikeComment, createCommentReply, getCommentReplies, deleteCommentReply } from "../services/postsApi";
-import type { ApiPost, ApiComment, ApiCommentReply } from "../services/postsApi";
+import { createPost, fetchFeed, deletePost, likePost, dislikePost, getRemainingPosts, createComment, getComments, deleteComment, likeComment, dislikeComment, createCommentReply, getCommentReplies, deleteCommentReply, searchPosts } from "../services/postsApi";
+import type { ApiPost, ApiComment, ApiCommentReply, ApiSearchResult } from "../services/postsApi";
 import { getMyAnonId } from "../services/session";
 
 export default function HomeFeed() {
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
 
     const [hoveredReplyId, setHoveredReplyId] = useState<number | null>(null);
     const [posts, setPosts] = useState<ApiPost[]>([]);
@@ -17,6 +18,13 @@ export default function HomeFeed() {
     const [isLoading, setIsLoading] = useState(true);
     const [postsLeftToday, setPostsLeftToday] = useState(3);
     const [myAnonId, setMyAnonId] = useState<string | null>(null);
+
+    // Search state
+    const [searchMode, setSearchMode] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searchResults, setSearchResults] = useState<ApiSearchResult[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchTotalCount, setSearchTotalCount] = useState(0);
 
     // Comment state
     const [commentText, setCommentText] = useState<Record<string, string>>({});
@@ -42,6 +50,16 @@ export default function HomeFeed() {
         setMyAnonId(id);
     }, []);
 
+    // Check URL params for search mode
+    useEffect(() => {
+        const shouldSearch = searchParams.get('search') === 'true';
+        if (shouldSearch && !searchMode) {
+            setSearchMode(true);
+        } else if (!shouldSearch && searchMode) {
+            setSearchMode(false);
+        }
+    }, [searchParams, searchMode]);
+
     // Load posts and remaining count on mount
     useEffect(() => {
         const loadData = async () => {
@@ -52,6 +70,19 @@ export default function HomeFeed() {
                 ]);
                 setPosts(feedResult.posts);
                 setPostsLeftToday(remainingResult.remaining);
+
+                // Load comments for all posts to show accurate comment counts
+                const commentsMap: Record<string, ApiComment[]> = {};
+                for (const post of feedResult.posts) {
+                    try {
+                        const result = await getComments(post.id);
+                        commentsMap[post.id] = result.comments;
+                    } catch (err) {
+                        console.error(`Failed to load comments for post ${post.id}:`, err);
+                        commentsMap[post.id] = [];
+                    }
+                }
+                setComments(commentsMap);
             } catch (err) {
                 console.error("Failed to load feed:", err);
             } finally {
@@ -84,6 +115,8 @@ export default function HomeFeed() {
             const response = await createPost(trimmedText);
             // Add new post to the top of the feed
             setPosts([response.post, ...posts]);
+            // Initialize empty comments for the new post
+            setComments({ [response.post.id]: [], ...comments });
             setPostText("");
             setPostsLeftToday(response.posts_remaining);
         } catch (err) {
@@ -187,7 +220,7 @@ export default function HomeFeed() {
             // Update comment count on post
             setPosts(posts.map(p => 
                 p.id === postId 
-                    ? { ...p, comments_count: p.comments_count + 1 }
+                    ? { ...p, comments_count: (p.comments_count || 0) + 1 }
                     : p
             ));
             // Clear input
@@ -213,7 +246,7 @@ export default function HomeFeed() {
             // Update comment count on post
             setPosts(posts.map(p => 
                 p.id === postId 
-                    ? { ...p, comments_count: Math.max(0, p.comments_count - 1) }
+                    ? { ...p, comments_count: Math.max(0, (p.comments_count || 0) - 1) }
                     : p
             ));
         } catch (err) {
@@ -284,7 +317,7 @@ export default function HomeFeed() {
                 ...comments,
                 [postId]: (comments[postId] || []).map(c =>
                     c.id === commentId
-                        ? { ...c, replies_count: c.replies_count + 1 }
+                        ? { ...c, replies_count: (c.replies_count || 0) + 1 }
                         : c
                 )
             });
@@ -312,7 +345,7 @@ export default function HomeFeed() {
                 ...comments,
                 [postId]: (comments[postId] || []).map(c =>
                     c.id === commentId
-                        ? { ...c, replies_count: Math.max(0, c.replies_count - 1) }
+                        ? { ...c, replies_count: Math.max(0, (c.replies_count || 0) - 1) }
                         : c
                 )
             });
@@ -323,6 +356,46 @@ export default function HomeFeed() {
         }
     };
 
+    // Search handlers
+    const handleSearch = async () => {
+        const query = searchQuery.trim();
+        if (!query) {
+            alert("Search query cannot be empty");
+            return;
+        }
+
+        setIsSearching(true);
+        try {
+            console.log('[Search] Searching for:', query);
+            const response = await searchPosts(query, 50, 0);
+            console.log('[Search] Response:', response);
+            setSearchResults(response.results);
+            setSearchTotalCount(response.total_count || 0);
+        } catch (err) {
+            console.error("[Search] Search failed:", err);
+            const errorMessage = err instanceof Error ? err.message : "Unknown error";
+            alert(`Search failed: ${errorMessage}`);
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleSearch();
+        }
+    };
+
+    const clearSearch = () => {
+        setSearchMode(false);
+        setSearchQuery("");
+        setSearchResults([]);
+        setSearchTotalCount(0);
+        // Remove search param from URL
+        searchParams.delete('search');
+        setSearchParams(searchParams);
+    };
+
     return (
         <div className="mx-auto w-full max-w-3xl space-y-6 px-3 sm:px-0">
             
@@ -331,20 +404,61 @@ export default function HomeFeed() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
                 <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">
-                Feed
+                {searchMode ? "Search Network" : "Feed"}
                 </h1>
                 <p className="text-sm text-slate-700 dark:text-green-300/70">
-                Anonymous network feed
+                {searchMode ? "Search posts by keywords or hashtags" : "Anonymous network feed"}
                 </p>
             </div>
 
-            <div className="w-fit rounded-full border border-emerald-600/30 dark:border-green-500/30 bg-white/60 dark:bg-black/20 px-3 py-1 text-sm font-mono text-emerald-800 dark:text-green-300">
-                {postsLeftToday} posts left
-            </div>
+            {searchMode ? (
+                <button
+                    onClick={clearSearch}
+                    className="rounded-full border border-emerald-500/30 dark:border-green-500/30 bg-emerald-500/10 dark:bg-green-500/10 px-4 py-1.5 text-sm font-mono text-emerald-800 dark:text-green-300 hover:bg-emerald-500/20 dark:hover:bg-green-500/20 transition-colors"
+                >
+                    ← Back to Feed
+                </button>
+            ) : (
+                <div className="rounded-full border border-emerald-600/30 dark:border-green-500/30 bg-white/60 dark:bg-black/20 px-3 py-1 text-sm font-mono text-emerald-800 dark:text-green-300">
+                    {postsLeftToday} posts left
+                </div>
+            )}
             </div>
         </div>
 
-        {/* Post Composer */}
+        {/* Search Bar */}
+        {searchMode && (
+            <div className="rounded-2xl border border-emerald-500/30 dark:border-green-500/30 bg-white/80 dark:bg-black/60 backdrop-blur-xl p-5 space-y-3 shadow-lg shadow-emerald-500/5 dark:shadow-green-500/5">
+                <div className="flex gap-3">
+                    <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={handleSearchKeyDown}
+                        placeholder="Search . . . . ."
+                        className="flex-1 px-4 py-3 rounded-xl border-2 border-emerald-500/30 dark:border-green-500/30 bg-white dark:bg-black text-slate-900 dark:text-green-100 placeholder:text-slate-500 dark:placeholder:text-green-300/50 outline-none focus:ring-2 focus:ring-emerald-500/50 dark:focus:ring-green-500/50 focus:border-emerald-500/50 dark:focus:border-green-500/50 transition-all"
+                    />
+                    <button
+                        onClick={handleSearch}
+                        disabled={isSearching || !searchQuery.trim()}
+                        className="px-6 py-3 rounded-xl font-mono border-2 border-emerald-500/40 dark:border-green-500/40 bg-emerald-500/15 dark:bg-green-500/15 text-emerald-800 dark:text-green-300 hover:bg-emerald-500/25 dark:hover:bg-green-500/25 hover:border-emerald-500/60 dark:hover:border-green-500/60 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold"
+                    >
+                        {isSearching ? "Searching..." : "Search"}
+                    </button>
+                </div>
+                <div className="text-xs text-slate-600 dark:text-green-300/60 font-mono">
+                    💡 Try: "hero" • "#fun" • "hero #fun" • "#programming #tutorial"
+                </div>
+                {searchTotalCount > 0 && (
+                    <div className="text-sm font-mono text-emerald-600 dark:text-green-300">
+                        Found {searchTotalCount} result{searchTotalCount !== 1 ? 's' : ''}
+                    </div>
+                )}
+            </div>
+        )}
+
+        {/* Post Composer - Only show when NOT in search mode */}
+        {!searchMode && (
         <div className="rounded-2xl border border-emerald-500/20 dark:border-green-500/20 bg-white/60 dark:bg-black/50 backdrop-blur p-4 space-y-3">
             <textarea
             value={postText}
@@ -372,9 +486,124 @@ export default function HomeFeed() {
             </button>
             </div>
         </div>
+        )}
 
-        {/* Posts */}
-        {isLoading ? (
+        {/* Posts or Search Results */}
+        {searchMode ? (
+            // Search Results
+            searchResults.length === 0 && !isSearching ? (
+                <div className="text-center py-8 text-slate-600 dark:text-green-300/70">
+                    {searchQuery ? "No results found. Try a different search query." : "Enter a search query above"}
+                </div>
+            ) : (
+                <div className="space-y-4">
+                    {searchResults.map((result) => {
+                        const post = result.post;
+                        const userKey = `user_${post.anon_id.substring(0, 8)}`;
+                        const status = getStatusForUser(userKey);
+
+                        const timeAgo = (isoDate: string) => {
+                            const minutes = Math.floor((Date.now() - new Date(isoDate).getTime()) / 60000);
+                            if (minutes < 1) return "just now";
+                            if (minutes < 60) return `${minutes}m ago`;
+                            const hours = Math.floor(minutes / 60);
+                            if (hours < 24) return `${hours}h ago`;
+                            return `${Math.floor(hours / 24)}d ago`;
+                        };
+
+                        return (
+                            <div
+                                key={post.id}
+                                className="rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/60 dark:bg-black/50 backdrop-blur p-4 space-y-3"
+                            >
+                                {/* Post Header */}
+                                <div className="flex items-center justify-between">
+                                    <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
+                                        User #{post.anon_id.substring(0, 8)}
+                                    </span>
+                                    <div className="flex items-center gap-3">
+                                        <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">
+                                            {timeAgo(post.created_at)}
+                                        </span>
+                                        <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 dark:bg-green-500/10 text-emerald-700 dark:text-green-400 border border-emerald-500/20 dark:border-green-500/20">
+                                            Score: {result.relevance_score.toFixed(1)}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Post Content */}
+                                <p className="text-slate-800 dark:text-green-100 leading-relaxed">
+                                    {post.text}
+                                </p>
+
+                                {/* Matched Terms */}
+                                {result.matched_terms && result.matched_terms.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {result.matched_terms.map((term, idx) => (
+                                            <span
+                                                key={idx}
+                                                className="px-2 py-1 rounded-md text-xs font-mono bg-emerald-500/10 dark:bg-green-500/10 text-emerald-700 dark:text-green-300 border border-emerald-500/20 dark:border-green-500/20"
+                                            >
+                                                {term.startsWith('#') ? term : `"${term}"`}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Like/Dislike Section */}
+                                <div className="mt-3 flex items-center gap-4 text-sm pt-2 border-t border-slate-200 dark:border-green-300/10">
+                                    {/* Like Button */}
+                                    <button
+                                        type="button"
+                                        onClick={() => handleLikePost(post.id)}
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+                                            post.user_reaction === "like"
+                                                ? "bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold"
+                                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                        }`}
+                                    >
+                                        <svg
+                                            className="w-5 h-5"
+                                            fill={post.user_reaction === "like" ? "currentColor" : "none"}
+                                            stroke="currentColor"
+                                            strokeWidth={post.user_reaction === "like" ? "0" : "2"}
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                                        </svg>
+                                        <span className="font-mono">{post.likes}</span>
+                                    </button>
+
+                                    {/* Dislike Button */}
+                                    <button
+                                        type="button"
+                                        onClick={() => handleDislikePost(post.id)}
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+                                            post.user_reaction === "dislike"
+                                                ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-semibold"
+                                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                        }`}
+                                    >
+                                        <svg
+                                            className="w-5 h-5 rotate-180"
+                                            fill={post.user_reaction === "dislike" ? "currentColor" : "none"}
+                                            stroke="currentColor"
+                                            strokeWidth={post.user_reaction === "dislike" ? "0" : "2"}
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                                        </svg>
+                                        <span className="font-mono">{post.dislikes}</span>
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )
+        ) : (
+        // Regular Feed
+        isLoading ? (
             <div className="text-center py-8 text-slate-600 dark:text-green-300/70">Loading feed...</div>
         ) : posts.length === 0 ? (
             <div className="text-center py-8 text-slate-600 dark:text-green-300/70">No posts yet. Be the first to post!</div>
@@ -444,71 +673,84 @@ export default function HomeFeed() {
                 </p>
 
                 {/* Like/Dislike Section */}
-                <div className="mt-3 flex items-center gap-4 text-sm">
-                    {/* Like Button */}
-                    <button
-                        type="button"
-                        onClick={() => handleLikePost(post.id)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
-                            post.user_reaction === "like"
-                                ? "bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold"
-                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
-                        }`}
-                    >
-                        <svg
-                            className="w-5 h-5"
-                            fill={post.user_reaction === "like" ? "currentColor" : "none"}
-                            stroke="currentColor"
-                            strokeWidth={post.user_reaction === "like" ? "0" : "2"}
-                            viewBox="0 0 24 24"
-                        >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-                        </svg>
-                        <span className="font-mono">{post.likes}</span>
-                    </button>
-
-                    {/* Dislike Button */}
-                    <button
-                        type="button"
-                        onClick={() => handleDislikePost(post.id)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
-                            post.user_reaction === "dislike"
-                                ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-semibold"
-                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
-                        }`}
-                    >
-                        <svg
-                            className="w-5 h-5 rotate-180"
-                            fill={post.user_reaction === "dislike" ? "currentColor" : "none"}
-                            stroke="currentColor"
-                            strokeWidth={post.user_reaction === "dislike" ? "0" : "2"}
-                            viewBox="0 0 24 24"
-                        >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-                        </svg>
-                        <span className="font-mono">{post.dislikes}</span>
-                    </button>
-
-                    {/* Delete Button - only show for own posts */}
-                    {myAnonId && post.anon_id === myAnonId && (
+                <div className="mt-3 flex items-center justify-between gap-4 text-sm">
+                    <div className="flex items-center gap-4">
+                        {/* Like Button */}
                         <button
                             type="button"
-                            onClick={() => handleDeletePost(post.id)}
-                            className="ml-auto text-slate-400 dark:text-green-300/50 hover:text-red-600 dark:hover:text-red-400 transition"
+                            onClick={() => handleLikePost(post.id)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+                                post.user_reaction === "like"
+                                    ? "bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                            }`}
                         >
-                            🗑️ delete
+                            <svg
+                                className="w-5 h-5"
+                                fill={post.user_reaction === "like" ? "currentColor" : "none"}
+                                stroke="currentColor"
+                                strokeWidth={post.user_reaction === "like" ? "0" : "2"}
+                                viewBox="0 0 24 24"
+                            >
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                            </svg>
+                            <span className="font-mono">{post.likes}</span>
                         </button>
-                    )}
+
+                        {/* Dislike Button */}
+                        <button
+                            type="button"
+                            onClick={() => handleDislikePost(post.id)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+                                post.user_reaction === "dislike"
+                                    ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-semibold"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                            }`}
+                        >
+                            <svg
+                                className="w-5 h-5 rotate-180"
+                                fill={post.user_reaction === "dislike" ? "currentColor" : "none"}
+                                stroke="currentColor"
+                                strokeWidth={post.user_reaction === "dislike" ? "0" : "2"}
+                                viewBox="0 0 24 24"
+                            >
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                            </svg>
+                            <span className="font-mono">{post.dislikes}</span>
+                        </button>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                        {/* Comment Counter Badge */}
+                        <div className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 font-mono text-xs cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                            onClick={() => toggleComments(post.id)}>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                            </svg>
+                            <span>{comments[post.id]?.length || 0}</span>
+                        </div>
+
+                        {/* Delete Button - only show for own posts */}
+                        {myAnonId && post.anon_id === myAnonId && (
+                            <button
+                                type="button"
+                                onClick={() => handleDeletePost(post.id)}
+                                className="text-slate-400 dark:text-green-300/50 hover:text-red-600 dark:hover:text-red-400 transition"
+                            >
+                                🗑️
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {/* Comment Toggle Button */}
-                <div className="mt-3">
+                <div className="mt-2">
                     <button
                         type="button"
                         onClick={() => toggleComments(post.id)}
                         className="text-sm text-slate-500 dark:text-green-300/60 hover:text-slate-700 dark:hover:text-green-300 font-mono transition"
                     >
-                        {showComments[post.id] ? '▼' : '▶'} {post.comments_count} comment{post.comments_count !== 1 ? 's' : ''}
+                        {showComments[post.id] ? '▼ Hide comments' : '▶ Show comments'}
                     </button>
                 </div>
 
@@ -791,8 +1033,10 @@ export default function HomeFeed() {
                 </div>
             );
             })}
-        </div>        )}
-        {/* Step B: Trust Request Modal */}
+        </div>
+        ))}
+        
+        {/* Trust Request Modal */}
         <TrustRequestModal
             open={trustOpen}
             onClose={closeTrustModal}

@@ -24,6 +24,7 @@ type Store interface {
 	ReactToPost(postID, anonID, reactionType string) error
 	GetPostReaction(postID, anonID string) (string, bool)
 	GetPost(postID string) (*Post, bool)
+	SearchPosts(query string, hashtags []string, limit int, offset int) ([]*PostSearchResult, int, error)
 
 	// Comments
 	AddComment(comment *PostComment) error
@@ -74,6 +75,14 @@ type AuditLog struct {
 	AnonID    string
 	Details   string
 	Timestamp time.Time
+}
+
+// PostSearchResult represents a post with search relevance information
+type PostSearchResult struct {
+	Post           *Post
+	RelevanceScore float64
+	MatchedTerms   []string
+	Highlights     string
 }
 
 var defaultStore Store

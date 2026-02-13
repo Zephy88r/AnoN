@@ -12,10 +12,12 @@ import LinkCards from "./pages/LinkCards";
 import Messages from "./pages/Messages";
 import ChatThread from "./pages/ChatThread";
 import Settings from "./pages/Settings";
+import Notifications from "./pages/Notifications";
 import Admin from "./pages/Admin";
 import AdminLogin from "./pages/AdminLogin";
 
 import RequireTrust from "./components/RequireTrust";
+import { NotificationProvider } from "./contexts/NotificationContext";
 import { bootstrapSession } from "./services/session";
 import { getSessionToken } from "./services/api";
 
@@ -52,32 +54,35 @@ export default function App() {
   }
 
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/admin" element={<AdminLogin />} />
-        <Route path="/admin/panel" element={<Admin />} />
+    <NotificationProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/admin" element={<AdminLogin />} />
+          <Route path="/admin/panel" element={<Admin />} />
 
-        <Route path="/app" element={<PageShell />}>
-          <Route index element={<Navigate to="feed" replace />} />
-          <Route path="feed" element={<HomeFeed />} />
-          <Route path="map" element={<Map />} />
-          <Route path="trust" element={<Trust />} />
-          <Route path="link-cards" element={<LinkCards />} />
-          <Route path="messages" element={<Messages />} />
-          <Route
-            path="messages/:threadId"
-            element={
-              <RequireTrust>
-                <ChatThread />
-              </RequireTrust>
-            }
-          />
-          <Route path="settings" element={<Settings />} />
-        </Route>
+          <Route path="/app" element={<PageShell />}>
+            <Route index element={<Navigate to="feed" replace />} />
+            <Route path="feed" element={<HomeFeed />} />
+            <Route path="map" element={<Map />} />
+            <Route path="trust" element={<Trust />} />
+            <Route path="link-cards" element={<LinkCards />} />
+            <Route path="messages" element={<Messages />} />
+            <Route
+              path="messages/:threadId"
+              element={
+                <RequireTrust>
+                  <ChatThread />
+                </RequireTrust>
+              }
+            />
+            <Route path="settings" element={<Settings />} />
+            <Route path="notifications" element={<Notifications />} />
+          </Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </NotificationProvider>
   );
 }

@@ -83,3 +83,26 @@ type CommentRepliesResponse struct {
 type CommentsResponse struct {
 	Comments []CommentDTO `json:"comments"`
 }
+
+// Search types
+type SearchRequest struct {
+	Query      string `json:"query"`
+	Limit      int    `json:"limit"`
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+type SearchResult struct {
+	Post           PostDTO  `json:"post"`
+	RelevanceScore float64  `json:"relevance_score"`
+	MatchedTerms   []string `json:"matched_terms,omitempty"`
+	Highlights     string   `json:"highlights,omitempty"`
+}
+
+type SearchResponse struct {
+	Results    []SearchResult `json:"results"`
+	Query      string         `json:"query"`
+	TotalCount int            `json:"total_count,omitempty"`
+	NextCursor string         `json:"next_cursor,omitempty"`
+	Hashtags   []string       `json:"hashtags,omitempty"` // extracted hashtags from query
+	Keywords   []string       `json:"keywords,omitempty"` // extracted keywords from query
+}

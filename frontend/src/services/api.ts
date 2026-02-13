@@ -98,6 +98,11 @@ async function rebootstrapOnce(): Promise<void> {
 
     const res = await fetch(url, { ...options, headers });
 
+    // Log request details in dev mode
+    if (import.meta.env.DEV) {
+        console.log(`[api] ${options.method || 'GET'} ${path} - Status: ${res.status}`);
+    }
+
     // ✅ Handle 401: rebootstrap once and retry
     if (res.status === 401 && shouldAuth && !config?._isRetry) {
         console.log("[api] 401 unauthorized, attempting rebootstrap...");
@@ -113,6 +118,7 @@ async function rebootstrapOnce(): Promise<void> {
 
     if (!res.ok) {
         const text = await res.text().catch(() => "");
+        console.error(`[api] Error ${res.status} for ${path}:`, text);
         throw new Error(`API ${res.status}: ${text}`);
     }
 

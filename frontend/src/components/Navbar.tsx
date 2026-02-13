@@ -6,9 +6,13 @@ import {
     SunIcon,
     ComputerDesktopIcon,
     } from "@heroicons/react/24/outline";
+import NotificationBell from "./NotificationBell";
 
+interface NavbarProps {
+  onNotificationToggle: () => void;
+}
 
-export default function Navbar() {
+export default function Navbar({ onNotificationToggle }: NavbarProps) {
     const { themeMode, setThemeMode } = useTheme();
     const focusRing = "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-green-400 dark:focus-visible:ring-offset-black";
     const navigate = useNavigate();
@@ -16,7 +20,7 @@ export default function Navbar() {
 
 
     return (
-        <header className="h-16 flex items-center justify-between px-6
+        <header className="relative h-16 flex items-center justify-between px-6
                 border-b border-emerald-500/20 dark:border-green-500/20
                 bg-white/70 dark:bg-black/55 backdrop-blur-xl">
 
@@ -31,13 +35,19 @@ export default function Navbar() {
         </div>
 
         {/* Center */}
-            <div className="hidden md:flex font-mono text-slate-600 dark:text-green-400/70">
+            <button
+                onClick={() => navigate("/app/feed?search=true")}
+                className="hidden md:flex font-mono text-slate-600 dark:text-green-400/70 hover:text-emerald-700 dark:hover:text-green-300 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-green-400 dark:focus-visible:ring-offset-black rounded-lg px-3 py-1"
+            >
                 &gt; search network
-            </div>
+            </button>
 
 
         {/* Right */}
         <div className="flex items-center gap-4">
+            {/* Notification Bell */}
+            <NotificationBell onToggle={onNotificationToggle} />
+
             <span className="font-mono text-sm text-slate-700 dark:text-green-300">
                 User #XXXXXX
             </span>

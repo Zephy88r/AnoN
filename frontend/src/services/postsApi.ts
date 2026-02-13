@@ -130,3 +130,29 @@ export async function deleteCommentReply(replyId: string) {
         body: JSON.stringify({ reply_id: replyId }),
     });
 }
+
+// Search types
+export type ApiSearchResult = {
+    post: ApiPost;
+    relevance_score: number;
+    matched_terms?: string[];
+    highlights?: string;
+};
+
+export type ApiSearchResponse = {
+    results: ApiSearchResult[];
+    query: string;
+    total_count?: number;
+    next_cursor?: string;
+    hashtags?: string[];
+    keywords?: string[];
+};
+
+export async function searchPosts(query: string, limit: number = 20, offset: number = 0) {
+    const params = new URLSearchParams({
+        q: query,
+        limit: limit.toString(),
+        offset: offset.toString(),
+    });
+    return apiFetch<ApiSearchResponse>(`/posts/search?${params}`);
+}

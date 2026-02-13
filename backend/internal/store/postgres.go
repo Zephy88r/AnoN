@@ -511,6 +511,228 @@ func (s *PgStore) GetPost(postID string) (*Post, bool) {
 	return p, true
 }
 
+// SearchPosts performs a comprehensive search across posts with ranking
+// Supports keyword search, hashtag filtering, typo tolerance, and mixed queries
+func (s *PgStore) SearchPosts(query string, hashtags []string, limit int, offset int) ([]*PostSearchResult, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var results []*PostSearchResult
+	var totalCount int
+
+	// Build the base query with ranking
+	// We'll use multiple ranking strategies and combine them
+	baseQuery := `
+		WITH ranked_posts AS (
+			SELECT 
+				id, anon_id, text, created_at, likes, dislikes, deleted,
+				hashtags,
+				CASE 
+					-- Strategy 1: Full-text search relevance (highest priority)
+					WHEN $1 != '' THEN 
+						ts_rank(text_search, plainto_tsquery('english', $1)) * 10.0
+					ELSE 0
+				END +
+				CASE
+					-- Strategy 2: Exact match bonus
+					WHEN $1 != '' AND LOWER(text) LIKE '%' || LOWER($1) || '%' THEN 5.0
+					ELSE 0
+				END +
+				CASE
+					-- Strategy 3: Prefix match bonus
+					WHEN $1 != '' AND LOWER(text) LIKE LOWER($1) || '%' THEN 3.0
+					ELSE 0
+				END +
+				CASE
+					-- Strategy 4: Fuzzy similarity (typo tolerance)
+					WHEN $1 != '' THEN 
+						similarity(LOWER(text), LOWER($1)) * 2.0
+					ELSE 0
+				END +
+				CASE
+					-- Strategy 5: Small recency boost (recent posts get slight advantage)
+					WHEN created_at > NOW() - INTERVAL '7 days' THEN 0.5
+					WHEN created_at > NOW() - INTERVAL '30 days' THEN 0.2
+					ELSE 0
+				END AS relevance_score
+			FROM posts
+			WHERE deleted = false
+	`
+
+	// Add hashtag filtering if hashtags are provided
+	args := []interface{}{query}
+	argIdx := 2
+	if len(hashtags) > 0 {
+		baseQuery += fmt.Sprintf(" AND hashtags @> $%d", argIdx)
+		args = append(args, hashtags)
+		argIdx++
+	}
+
+	// Add keyword filter (must match if query is provided)
+	if query != "" {
+		baseQuery += fmt.Sprintf(` AND (
+			text_search @@ plainto_tsquery('english', $%d)
+			OR LOWER(text) LIKE '%%' || LOWER($%d) || '%%'
+			OR similarity(LOWER(text), LOWER($%d)) > 0.1
+		)`, argIdx, argIdx, argIdx)
+		args = append(args, query)
+		argIdx++
+	}
+
+	// Complete the CTE
+	baseQuery += `
+		)`
+
+	// Get total count
+	countQuery := baseQuery + `
+		SELECT COUNT(*) FROM ranked_posts WHERE relevance_score > 0
+	`
+	err := s.db.QueryRow(countQuery, args...).Scan(&totalCount)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, 0, fmt.Errorf("count search results: %w", err)
+	}
+
+	// Complete the main query with ordering, pagination
+	mainQuery := baseQuery + `
+		SELECT 
+			id, anon_id, text, created_at, likes, dislikes, deleted,
+			hashtags, relevance_score
+		FROM ranked_posts
+		WHERE relevance_score > 0
+		ORDER BY relevance_score DESC, created_at DESC
+		LIMIT $` + fmt.Sprintf("%d", argIdx) + ` OFFSET $` + fmt.Sprintf("%d", argIdx+1)
+
+	args = append(args, limit, offset)
+
+	rows, err := s.db.Query(mainQuery, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search posts: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		result := &PostSearchResult{
+			Post: &Post{},
+		}
+		var hashtagsArray []string
+		var hashtagsRaw sql.NullString
+
+		err := rows.Scan(
+			&result.Post.ID,
+			&result.Post.AnonID,
+			&result.Post.Text,
+			&result.Post.CreatedAt,
+			&result.Post.Likes,
+			&result.Post.Dislikes,
+			&result.Post.Deleted,
+			&hashtagsRaw,
+			&result.RelevanceScore,
+		)
+		if err != nil {
+			fmt.Printf("error scanning search result: %v\n", err)
+			continue
+		}
+
+		// Parse hashtags array from postgres
+		if hashtagsRaw.Valid {
+			// PostgreSQL array comes as {tag1,tag2,tag3}
+			hashtagsStr := hashtagsRaw.String
+			if len(hashtagsStr) > 2 {
+				hashtagsStr = hashtagsStr[1 : len(hashtagsStr)-1] // remove { }
+				if hashtagsStr != "" {
+					for _, tag := range parsePostgresArray(hashtagsStr) {
+						hashtagsArray = append(hashtagsArray, tag)
+					}
+				}
+			}
+		}
+
+		// Extract matched terms for highlighting
+		result.MatchedTerms = extractMatchedTerms(query, hashtagsArray)
+		result.Highlights = generateHighlights(result.Post.Text, query, 100)
+
+		results = append(results, result)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate search results: %w", err)
+	}
+
+	return results, totalCount, nil
+}
+
+// Helper function to parse PostgreSQL array format
+func parsePostgresArray(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	// Simple split - for production, consider using a proper parser
+	parts := []string{}
+	for _, part := range splitPostgresArray(s) {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+func splitPostgresArray(s string) []string {
+	// Handle quoted and unquoted elements
+	var result []string
+	var current []rune
+	inQuote := false
+
+	for i, r := range s {
+		if r == '"' {
+			inQuote = !inQuote
+		} else if r == ',' && !inQuote {
+			if len(current) > 0 {
+				result = append(result, string(current))
+				current = []rune{}
+			}
+		} else {
+			current = append(current, r)
+		}
+
+		// Add last element
+		if i == len(s)-1 && len(current) > 0 {
+			result = append(result, string(current))
+		}
+	}
+
+	return result
+}
+
+// Extract terms that matched from the query
+func extractMatchedTerms(query string, hashtags []string) []string {
+	terms := []string{}
+	if query != "" {
+		terms = append(terms, query)
+	}
+	terms = append(terms, hashtags...)
+	return terms
+}
+
+// Generate highlighted snippet of text
+func generateHighlights(text string, query string, maxLen int) string {
+	if query == "" || len(text) <= maxLen {
+		if len(text) > maxLen {
+			return text[:maxLen] + "..."
+		}
+		return text
+	}
+
+	// Simple highlighting: return snippet around the match
+	if len(text) > maxLen {
+		return text[:maxLen] + "..."
+	}
+	return text
+}
+
 // DeletePostByUser marks a post as deleted if the user is the author
 func (s *PgStore) DeletePostByUser(postID, anonID string) error {
 	query := `UPDATE posts SET deleted = true WHERE id = $1 AND anon_id = $2 AND deleted = false`

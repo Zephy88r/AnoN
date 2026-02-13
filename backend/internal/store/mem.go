@@ -499,6 +499,188 @@ func (s *MemStore) GetPost(postID string) (*Post, bool) {
 	return nil, false
 }
 
+// SearchPosts performs basic in-memory search (simplified version for MemStore)
+func (s *MemStore) SearchPosts(query string, hashtags []string, limit int, offset int) ([]*PostSearchResult, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Simple case-insensitive search
+	searchLower := toLower(query)
+	var results []*PostSearchResult
+
+	for _, p := range s.posts {
+		if p.Deleted {
+			continue
+		}
+
+		textLower := toLower(p.Text)
+		score := 0.0
+
+		// Check hashtag match (if hashtags are provided, must match all)
+		if len(hashtags) > 0 {
+			postHashtags := extractHashtagsFromText(p.Text)
+			if !containsAllHashtags(postHashtags, hashtags) {
+				continue
+			}
+			score += 5.0
+		}
+
+		// Check keyword match
+		if query != "" {
+			if !contains(textLower, searchLower) {
+				continue
+			}
+
+			// Exact match
+			if textLower == searchLower {
+				score += 10.0
+			} else if startsWith(textLower, searchLower) {
+				score += 5.0
+			} else {
+				score += 2.0
+			}
+		} else if len(hashtags) == 0 {
+			// No query and no hashtags - skip
+			continue
+		}
+
+		// Recency boost
+		age := time.Since(p.CreatedAt)
+		if age < 7*24*time.Hour {
+			score += 0.5
+		} else if age < 30*24*time.Hour {
+			score += 0.2
+		}
+
+		results = append(results, &PostSearchResult{
+			Post:           p,
+			RelevanceScore: score,
+			MatchedTerms:   append([]string{query}, hashtags...),
+			Highlights:     truncateText(p.Text, 100),
+		})
+	}
+
+	// Sort by relevance
+	sortSearchResults(results)
+
+	totalCount := len(results)
+
+	// Apply pagination
+	if offset >= len(results) {
+		return []*PostSearchResult{}, totalCount, nil
+	}
+
+	end := offset + limit
+	if end > len(results) {
+		end = len(results)
+	}
+
+	return results[offset:end], totalCount, nil
+}
+
+// Helper functions for simple string operations
+func toLower(s string) string {
+	result := make([]rune, len(s))
+	for i, r := range s {
+		if r >= 'A' && r <= 'Z' {
+			result[i] = r + 32
+		} else {
+			result[i] = r
+		}
+	}
+	return string(result)
+}
+
+func contains(s, substr string) bool {
+	if len(substr) > len(s) {
+		return false
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func startsWith(s, prefix string) bool {
+	if len(prefix) > len(s) {
+		return false
+	}
+	return s[:len(prefix)] == prefix
+}
+
+func extractHashtagsFromText(text string) []string {
+	var hashtags []string
+	words := splitWords(text)
+	for _, word := range words {
+		if len(word) > 1 && word[0] == '#' {
+			hashtags = append(hashtags, toLower(word[1:]))
+		}
+	}
+	return hashtags
+}
+
+func splitWords(text string) []string {
+	var words []string
+	var current []rune
+	for _, r := range text {
+		if r == ' ' || r == '\n' || r == '\t' || r == '\r' {
+			if len(current) > 0 {
+				words = append(words, string(current))
+				current = []rune{}
+			}
+		} else {
+			current = append(current, r)
+		}
+	}
+	if len(current) > 0 {
+		words = append(words, string(current))
+	}
+	return words
+}
+
+func containsAllHashtags(postHashtags, requiredHashtags []string) bool {
+	for _, required := range requiredHashtags {
+		found := false
+		for _, tag := range postHashtags {
+			if tag == toLower(required) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func truncateText(text string, maxLen int) string {
+	if len(text) <= maxLen {
+		return text
+	}
+	return text[:maxLen] + "..."
+}
+
+func sortSearchResults(results []*PostSearchResult) {
+	// Simple bubble sort by relevance score (descending)
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[j].RelevanceScore > results[i].RelevanceScore {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+}
+
 // DeletePostByUser marks a post as deleted if the user is the author
 func (s *MemStore) DeletePostByUser(postID, anonID string) error {
 	s.mu.Lock()
