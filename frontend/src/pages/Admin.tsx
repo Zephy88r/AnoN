@@ -13,6 +13,7 @@ import StatCard from "../components/admin/StatCard";
 import Panel from "../components/admin/Panel";
 import DataTable from "../components/admin/DataTable";
 import SystemHealthPanel from "../components/admin/SystemHealthPanel";
+import ConfirmationModal from "../components/ConfirmationModal";
 import { formatAdminTime } from "../utils/formatTime";
 import {
     clearAdminToken,
@@ -26,6 +27,7 @@ import {
     fetchAdminTrust,
     fetchAdminUsers,
     getAdminToken,
+    revokeSession,
     type AbuseReport,
     type AdminPost,
     type AdminSession,
@@ -67,6 +69,13 @@ export default function Admin() {
     const [feedFilter, setFeedFilter] = useState("");
     const [usersFilter, setUsersFilter] = useState("");
     const [abuseFilter, setAbuseFilter] = useState("");
+
+    // Revoke session modal state
+    const [revokeModalOpen, setRevokeModalOpen] = useState(false);
+    const [sessionToRevoke, setSessionToRevoke] = useState<{ token: string; anonId: string } | null>(null);
+
+    // Session selection state
+    const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
 
     const trustSummary = useMemo(() => {
         const summary = { pending: 0, accepted: 0, declined: 0 };
@@ -147,6 +156,67 @@ export default function Admin() {
             setAuditLogs(auditRes.logs);
         } catch (err) {
             const msg = err instanceof Error ? err.message : "Failed to delete post";
+            setError(msg);
+        }
+    };
+
+    const handleRevokeSessionClick = (token: string, anonId: string) => {
+        setSessionToRevoke({ token, anonId });
+        setRevokeModalOpen(true);
+    };
+
+    const handleConfirmRevoke = async () => {
+        if (!sessionToRevoke) return;
+
+        try {
+            await revokeSession(sessionToRevoke.token);
+            setSessions((prev) => prev.filter((s) => s.token !== sessionToRevoke.token));
+            const auditRes = await fetchAdminAudit();
+            setAuditLogs(auditRes.logs);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to revoke session";
+            setError(msg);
+        }
+    };
+
+    const handleSelectSession = (token: string) => {
+        setSelectedSessions((prev) => {
+            const next = new Set(prev);
+            if (next.has(token)) {
+                next.delete(token);
+            } else {
+                next.add(token);
+            }
+            return next;
+        });
+    };
+
+    const handleSelectAllSessions = (isSelected: boolean) => {
+        if (isSelected) {
+            const allTokens = new Set(sessions.map((s) => s.token));
+            setSelectedSessions(allTokens);
+        } else {
+            setSelectedSessions(new Set());
+        }
+    };
+
+    const handleBulkRevokeClick = () => {
+        setRevokeModalOpen(true);
+    };
+
+    const handleConfirmBulkRevoke = async () => {
+        if (selectedSessions.size === 0) return;
+
+        try {
+            for (const token of selectedSessions) {
+                await revokeSession(token);
+            }
+            setSessions((prev) => prev.filter((s) => !selectedSessions.has(s.token)));
+            setSelectedSessions(new Set());
+            const auditRes = await fetchAdminAudit();
+            setAuditLogs(auditRes.logs);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to revoke sessions";
             setError(msg);
         }
     };
@@ -370,9 +440,34 @@ export default function Admin() {
             <div>
                 <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Sessions</h1>
                 <p className="text-sm text-slate-700 dark:text-green-300/70">
-                    Active user sessions overview
+                    Active user sessions overview • {sessions.length} active
+                    {selectedSessions.size > 0 && ` • ${selectedSessions.size} selected`}
                 </p>
             </div>
+
+            {selectedSessions.size > 0 && (
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 dark:border-green-500/30 bg-emerald-500/5 dark:bg-green-500/10 p-4">
+                    <div className="flex-1">
+                        <p className="text-sm font-mono text-emerald-800 dark:text-green-300">
+                            {selectedSessions.size} session{selectedSessions.size !== 1 ? 's' : ''} selected
+                        </p>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setSelectedSessions(new Set())}
+                        className="rounded-lg px-3 py-1 text-xs border border-slate-300 dark:border-green-500/30 text-slate-600 dark:text-green-300 hover:bg-slate-50 dark:hover:bg-green-500/10 transition-colors"
+                    >
+                        Clear
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleBulkRevokeClick}
+                        className="rounded-lg px-3 py-1 text-xs border border-red-400/40 text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10 transition-colors font-mono font-semibold"
+                    >
+                        Revoke All
+                    </button>
+                </div>
+            )}
 
             <Panel>
                 <DataTable
@@ -388,7 +483,7 @@ export default function Admin() {
                             key: "token",
                             label: "Token",
                             render: (s: AdminSession) => (
-                                <span className="font-mono">{maskToken(s.token)}</span>
+                                <span className="font-mono text-xs">{maskToken(s.token)}</span>
                             ),
                         },
                         {
@@ -407,10 +502,27 @@ export default function Admin() {
                                 <span>{formatAdminTime(s.expires_at)}</span>
                             ),
                         },
+                        {
+                            key: "actions",
+                            label: "Actions",
+                            render: (s: AdminSession) => (
+                                <button
+                                    type="button"
+                                    onClick={() => handleRevokeSessionClick(s.token, s.anon_id)}
+                                    className="rounded-lg px-3 py-1 text-xs border border-red-400/40 text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10"
+                                >
+                                    Revoke
+                                </button>
+                            ),
+                        },
                     ]}
                     data={sessions}
                     keyExtractor={(s) => s.token}
                     emptyMessage="No sessions recorded"
+                    selectable={true}
+                    selectedItems={selectedSessions}
+                    onSelectItem={handleSelectSession}
+                    onSelectAll={handleSelectAllSessions}
                 />
             </Panel>
         </div>
@@ -878,6 +990,25 @@ export default function Admin() {
             onLogout={handleClearKey}
         >
             {renderContent()}
+
+            {/* Revoke Session Confirmation Modal */}
+            <ConfirmationModal
+                open={revokeModalOpen}
+                onClose={() => {
+                    setRevokeModalOpen(false);
+                    setSessionToRevoke(null);
+                }}
+                onConfirm={sessionToRevoke ? handleConfirmRevoke : handleConfirmBulkRevoke}
+                title={sessionToRevoke ? "Revoke Session" : "Revoke Selected Sessions"}
+                message={
+                    sessionToRevoke
+                        ? `Are you sure you want to revoke the session for user ${sessionToRevoke.anonId.slice(0, 8)}? This will force the user to logout immediately.`
+                        : `Are you sure you want to revoke ${selectedSessions.size} session${selectedSessions.size !== 1 ? 's' : ''}? All selected users will be forced to logout immediately.`
+                }
+                confirmText={sessionToRevoke ? "Revoke Session" : `Revoke ${selectedSessions.size} Session${selectedSessions.size !== 1 ? 's' : ''}`}
+                cancelText="Cancel"
+                danger={true}
+            />
         </AdminLayout>
     );
 }

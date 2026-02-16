@@ -34,18 +34,28 @@ func SessionBootstrap(cfg config.Config) http.HandlerFunc {
 
 		now := time.Now()
 		err = store.DefaultStore().PutSession(store.SessionInfo{
-			ID:        "",
-			AnonID:    anonID,
-			Token:     token,
-			IssuedAt:  now,
-			ExpiresAt: now.Add(cfg.JWTTTL),
-			CreatedAt: now,
+			ID:             "",
+			AnonID:         anonID,
+			Token:          token,
+			IssuedAt:       now,
+			ExpiresAt:      now.Add(cfg.JWTTTL),
+			CreatedAt:      now,
+			LastActivityAt: now,
 		})
 		if err != nil {
 			log.Printf("persist session: failed: %v", err)
 			http.Error(w, "failed to persist session", http.StatusInternalServerError)
 			return
 		}
+
+		// Enforce session limit per user
+		if cfg.MaxSessionsPerUser > 0 {
+			if err := store.DefaultStore().EnforceSessionLimit(anonID, cfg.MaxSessionsPerUser); err != nil {
+				log.Printf("enforce session limit: failed: %v", err)
+				// Don't fail the request, just log the error
+			}
+		}
+
 		log.Printf("persist session: ok")
 
 		resp := types.BootstrapResponse{
@@ -75,6 +85,49 @@ func SessionMe(cfg config.Config) http.HandlerFunc {
 			AnonID: claims.AnonID,
 			Region: claims.Region,
 			ExpISO: exp,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+func SessionRefresh(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims := httpctx.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, "no claims", http.StatusUnauthorized)
+			return
+		}
+
+		// Generate new token with extended expiration
+		anonID := claims.AnonID
+		region := claims.Region
+		token, err := security.SignSessionJWT(cfg.JWTSecret, cfg.JWTTTL, anonID, region)
+		if err != nil {
+			http.Error(w, "failed to refresh token", http.StatusInternalServerError)
+			return
+		}
+
+		now := time.Now()
+		err = store.DefaultStore().PutSession(store.SessionInfo{
+			ID:             "",
+			AnonID:         anonID,
+			Token:          token,
+			IssuedAt:       now,
+			ExpiresAt:      now.Add(cfg.JWTTTL),
+			CreatedAt:      now,
+			LastActivityAt: now,
+		})
+		if err != nil {
+			log.Printf("persist refreshed session: failed: %v", err)
+			http.Error(w, "failed to persist session", http.StatusInternalServerError)
+			return
+		}
+
+		resp := types.BootstrapResponse{
+			Token:  token,
+			AnonID: anonID,
 		}
 
 		w.Header().Set("Content-Type", "application/json")

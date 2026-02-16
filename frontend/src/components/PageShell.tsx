@@ -6,10 +6,14 @@ import UtilityPanel from "./UtilityPanel";
 import NotificationPanel from "./NotificationPanel";
 import bgDark from "../assets/background-dark.png";
 import bgLight from "../assets/background-light.png";
+import { useSessionManager } from "../hooks/useSessionManager";
 
 
 export default function PageShell() {
     const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+    
+    // Initialize session management for authenticated pages
+    useSessionManager();
 
     return (
         <div

@@ -126,3 +126,21 @@ export async function fetchAdminAudit() {
 export async function fetchAdminHealth() {
     return adminFetch<{ status: string; timestamp: string; uptime: string }>("/health");
 }
+
+export async function revokeSession(token: string) {
+    return adminFetch<{ status: string; message: string }>("/sessions/revoke", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+    });
+}
+
+export async function revokeAllUserSessions(anonID: string) {
+    return adminFetch<{ status: string; message: string; sessions_revoked: number }>("/sessions/revoke-all", {
+        method: "POST",
+        body: JSON.stringify({ anon_id: anonID }),
+    });
+}
+
+export async function fetchUserSessions(anonID: string) {
+    return adminFetch<{ sessions: AdminSession[]; total: number }>(`/sessions/user?anon_id=${anonID}`);
+}

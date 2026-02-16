@@ -354,7 +354,8 @@ func (s *PgStore) GetAllSessions() []*SessionInfo {
 			COALESCE(token, ''),
 			expires_at,
 			COALESCE(issued_at, created_at),
-			COALESCE(created_at, issued_at)
+			COALESCE(created_at, issued_at),
+			COALESCE(last_activity_at, issued_at, created_at)
 		FROM sessions
 		ORDER BY created_at DESC
 	`
@@ -369,7 +370,7 @@ func (s *PgStore) GetAllSessions() []*SessionInfo {
 	out := []*SessionInfo{}
 	for rows.Next() {
 		s := &SessionInfo{}
-		if err := rows.Scan(&s.ID, &s.AnonID, &s.Token, &s.ExpiresAt, &s.IssuedAt, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.AnonID, &s.Token, &s.ExpiresAt, &s.IssuedAt, &s.CreatedAt, &s.LastActivityAt); err != nil {
 			fmt.Printf("error scanning session: %v\n", err)
 			continue
 		}
@@ -392,6 +393,11 @@ func (s *PgStore) PutSession(session SessionInfo) error {
 		createdAt = issuedAt
 	}
 
+	lastActivityAt := session.LastActivityAt
+	if lastActivityAt.IsZero() {
+		lastActivityAt = issuedAt
+	}
+
 	if session.ID == "" {
 		id, err := newUUID()
 		if err != nil {
@@ -401,10 +407,10 @@ func (s *PgStore) PutSession(session SessionInfo) error {
 	}
 
 	query := `
-		INSERT INTO sessions (id, anon_id, issued_at, expires_at, token, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO sessions (id, anon_id, issued_at, expires_at, token, created_at, last_activity_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
-	_, err := s.db.Exec(query, session.ID, session.AnonID, issuedAt, session.ExpiresAt, session.Token, createdAt)
+	_, err := s.db.Exec(query, session.ID, session.AnonID, issuedAt, session.ExpiresAt, session.Token, createdAt, lastActivityAt)
 	if err != nil {
 		return fmt.Errorf("put session: %w", err)
 	}
@@ -477,6 +483,131 @@ func (s *PgStore) DeletePost(postID string) error {
 	if err != nil {
 		return fmt.Errorf("delete post: %w", err)
 	}
+	return nil
+}
+
+// Session management methods
+func (s *PgStore) UpdateSessionActivity(token string) error {
+	query := `UPDATE sessions SET last_activity_at = $1 WHERE token = $2`
+	_, err := s.db.Exec(query, time.Now(), token)
+	if err != nil {
+		return fmt.Errorf("update session activity: %w", err)
+	}
+	return nil
+}
+
+func (s *PgStore) CleanupExpiredSessions() (int, error) {
+	query := `DELETE FROM sessions WHERE expires_at < $1`
+	result, err := s.db.Exec(query, time.Now())
+	if err != nil {
+		return 0, fmt.Errorf("cleanup expired sessions: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("get rows affected: %w", err)
+	}
+
+	return int(count), nil
+}
+
+func (s *PgStore) GetSessionByToken(token string) (*SessionInfo, error) {
+	query := `
+		SELECT id, anon_id, issued_at, expires_at, token, created_at, COALESCE(last_activity_at, issued_at)
+		FROM sessions 
+		WHERE token = $1
+	`
+	sess := &SessionInfo{}
+	err := s.db.QueryRow(query, token).Scan(
+		&sess.ID,
+		&sess.AnonID,
+		&sess.IssuedAt,
+		&sess.ExpiresAt,
+		&sess.Token,
+		&sess.CreatedAt,
+		&sess.LastActivityAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get session: %w", err)
+	}
+	return sess, nil
+}
+
+func (s *PgStore) GetSessionsByAnonID(anonID string) ([]*SessionInfo, error) {
+	query := `
+		SELECT id, anon_id, issued_at, expires_at, token, created_at, COALESCE(last_activity_at, issued_at)
+		FROM sessions 
+		WHERE anon_id = $1
+		ORDER BY last_activity_at DESC
+	`
+	rows, err := s.db.Query(query, anonID)
+	if err != nil {
+		return nil, fmt.Errorf("get sessions by anon id: %w", err)
+	}
+	defer rows.Close()
+
+	sessions := make([]*SessionInfo, 0)
+	for rows.Next() {
+		sess := &SessionInfo{}
+		if err := rows.Scan(&sess.ID, &sess.AnonID, &sess.IssuedAt, &sess.ExpiresAt, &sess.Token, &sess.CreatedAt, &sess.LastActivityAt); err != nil {
+			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		sessions = append(sessions, sess)
+	}
+
+	return sessions, nil
+}
+
+func (s *PgStore) RevokeSession(token string) error {
+	query := `DELETE FROM sessions WHERE token = $1`
+	result, err := s.db.Exec(query, token)
+	if err != nil {
+		return fmt.Errorf("revoke session: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
+
+	if count == 0 {
+		return fmt.Errorf("session not found")
+	}
+
+	return nil
+}
+
+func (s *PgStore) RevokeAllSessionsForUser(anonID string) (int, error) {
+	query := `DELETE FROM sessions WHERE anon_id = $1`
+	result, err := s.db.Exec(query, anonID)
+	if err != nil {
+		return 0, fmt.Errorf("revoke all sessions: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("get rows affected: %w", err)
+	}
+
+	return int(count), nil
+}
+
+func (s *PgStore) EnforceSessionLimit(anonID string, maxSessions int) error {
+	// Delete oldest sessions beyond the limit
+	query := `
+		DELETE FROM sessions 
+		WHERE token IN (
+			SELECT token FROM sessions 
+			WHERE anon_id = $1
+			ORDER BY COALESCE(last_activity_at, issued_at) ASC
+			OFFSET $2
+		)
+	`
+	_, err := s.db.Exec(query, anonID, maxSessions)
+	if err != nil {
+		return fmt.Errorf("enforce session limit: %w", err)
+	}
+
 	return nil
 }
 

@@ -51,6 +51,15 @@ type Store interface {
 	DeletePost(postID string) error
 	LogAuditEvent(event AuditLog)
 	PutSession(session SessionInfo) error
+
+	// Session management
+	UpdateSessionActivity(token string) error
+	CleanupExpiredSessions() (int, error)
+	GetSessionByToken(token string) (*SessionInfo, error)
+	GetSessionsByAnonID(anonID string) ([]*SessionInfo, error)
+	RevokeSession(token string) error
+	RevokeAllSessionsForUser(anonID string) (int, error)
+	EnforceSessionLimit(anonID string, maxSessions int) error
 }
 
 // Admin types
@@ -61,12 +70,13 @@ type UserInfo struct {
 }
 
 type SessionInfo struct {
-	ID        string
-	AnonID    string
-	Token     string
-	IssuedAt  time.Time
-	ExpiresAt time.Time
-	CreatedAt time.Time
+	ID             string
+	AnonID         string
+	Token          string
+	IssuedAt       time.Time
+	ExpiresAt      time.Time
+	CreatedAt      time.Time
+	LastActivityAt time.Time
 }
 
 type AuditLog struct {

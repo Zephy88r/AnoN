@@ -2,17 +2,19 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"time"
 )
 
 type Config struct {
-	Addr        string
-	JWTSecret   string
-	JWTTTL      time.Duration
-	AnonHMACKey string
-	DatabaseURL string
-	AdminEmail  string
-	AdminPass   string
+	Addr               string
+	JWTSecret          string
+	JWTTTL             time.Duration
+	AnonHMACKey        string
+	DatabaseURL        string
+	AdminEmail         string
+	AdminPass          string
+	MaxSessionsPerUser int
 }
 
 func Load() Config {
@@ -32,14 +34,22 @@ func Load() Config {
 		d = 30 * time.Minute
 	}
 
+	maxSessions := 5
+	if maxSessionsStr := getenv("MAX_SESSIONS_PER_USER", "5"); maxSessionsStr != "" {
+		if n, err := strconv.Atoi(maxSessionsStr); err == nil && n > 0 {
+			maxSessions = n
+		}
+	}
+
 	return Config{
-		Addr:        addr,
-		JWTSecret:   jwtSecret,
-		JWTTTL:      d,
-		AnonHMACKey: anonKey,
-		DatabaseURL: dbURL,
-		AdminEmail:  adminEmail,
-		AdminPass:   adminPass,
+		Addr:               addr,
+		JWTSecret:          jwtSecret,
+		JWTTTL:             d,
+		AnonHMACKey:        anonKey,
+		DatabaseURL:        dbURL,
+		AdminEmail:         adminEmail,
+		AdminPass:          adminPass,
+		MaxSessionsPerUser: maxSessions,
 	}
 }
 

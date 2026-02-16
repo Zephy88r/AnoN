@@ -460,6 +460,142 @@ func (s *MemStore) GetAllTrustRequests() []*TrustRequest {
 	return requests
 }
 
+// Session management methods
+func (s *MemStore) UpdateSessionActivity(token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sess, ok := s.sessions[token]
+	if !ok {
+		return fmt.Errorf("session not found")
+	}
+
+	sess.LastActivityAt = time.Now()
+	return nil
+}
+
+func (s *MemStore) CleanupExpiredSessions() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	count := 0
+
+	for token, sess := range s.sessions {
+		if sess.ExpiresAt.Before(now) {
+			delete(s.sessions, token)
+			count++
+		}
+	}
+
+	return count, nil
+}
+
+func (s *MemStore) GetSessionByToken(token string) (*SessionInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	sess, ok := s.sessions[token]
+	if !ok {
+		return nil, fmt.Errorf("session not found")
+	}
+
+	// Return a copy
+	copy := *sess
+	return &copy, nil
+}
+
+func (s *MemStore) GetSessionsByAnonID(anonID string) ([]*SessionInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	sessions := make([]*SessionInfo, 0)
+	for _, sess := range s.sessions {
+		if sess.AnonID == anonID {
+			copy := *sess
+			sessions = append(sessions, &copy)
+		}
+	}
+
+	return sessions, nil
+}
+
+func (s *MemStore) RevokeSession(token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.sessions[token]; !ok {
+		return fmt.Errorf("session not found")
+	}
+
+	delete(s.sessions, token)
+	return nil
+}
+
+func (s *MemStore) RevokeAllSessionsForUser(anonID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := 0
+	for token, sess := range s.sessions {
+		if sess.AnonID == anonID {
+			delete(s.sessions, token)
+			count++
+		}
+	}
+
+	return count, nil
+}
+
+func (s *MemStore) EnforceSessionLimit(anonID string, maxSessions int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Collect all sessions for this user
+	userSessions := make([]*SessionInfo, 0)
+	for _, sess := range s.sessions {
+		if sess.AnonID == anonID {
+			userSessions = append(userSessions, sess)
+		}
+	}
+
+	// If under limit, nothing to do
+	if len(userSessions) <= maxSessions {
+		return nil
+	}
+
+	// Sort by LastActivityAt (oldest first)
+	type sessionWithActivity struct {
+		session  *SessionInfo
+		activity time.Time
+	}
+	sessionsWithActivity := make([]sessionWithActivity, len(userSessions))
+	for i, sess := range userSessions {
+		activity := sess.LastActivityAt
+		if activity.IsZero() {
+			activity = sess.IssuedAt
+		}
+		sessionsWithActivity[i] = sessionWithActivity{session: sess, activity: activity}
+	}
+
+	// Simple bubble sort (fine for small n)
+	for i := 0; i < len(sessionsWithActivity)-1; i++ {
+		for j := 0; j < len(sessionsWithActivity)-i-1; j++ {
+			if sessionsWithActivity[j].activity.After(sessionsWithActivity[j+1].activity) {
+				sessionsWithActivity[j], sessionsWithActivity[j+1] = sessionsWithActivity[j+1], sessionsWithActivity[j]
+			}
+		}
+	}
+
+	// Remove oldest sessions until we're at the limit
+	toRemove := len(userSessions) - maxSessions
+	for i := 0; i < toRemove; i++ {
+		delete(s.sessions, sessionsWithActivity[i].session.Token)
+	}
+
+	return nil
+}
+
 func (s *MemStore) GetAuditLogs() []AuditLog {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

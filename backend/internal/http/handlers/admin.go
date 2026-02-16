@@ -367,3 +367,114 @@ func AdminGetAuditLog(cfg config.Config) http.HandlerFunc {
 		})
 	}
 }
+
+// AdminRevokeSession revokes a specific session by token
+func AdminRevokeSession(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Token string `json:"token"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		if req.Token == "" {
+			http.Error(w, "token required", http.StatusBadRequest)
+			return
+		}
+
+		// Get session details before revoking for audit
+		sess, err := store.DefaultStore().GetSessionByToken(req.Token)
+		if err != nil {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+
+		// Revoke the session
+		if err := store.DefaultStore().RevokeSession(req.Token); err != nil {
+			http.Error(w, "failed to revoke session", http.StatusInternalServerError)
+			return
+		}
+
+		// Log audit event
+		store.DefaultStore().LogAuditEvent(store.AuditLog{
+			Action:  "revoke_session",
+			AnonID:  "admin",
+			Details: "Revoked session for anon_id: " + sess.AnonID,
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": "session revoked",
+		})
+	}
+}
+
+// AdminRevokeAllUserSessions revokes all sessions for a specific user
+func AdminRevokeAllUserSessions(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			AnonID string `json:"anon_id"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		if req.AnonID == "" {
+			http.Error(w, "anon_id required", http.StatusBadRequest)
+			return
+		}
+
+		// Revoke all sessions
+		count, err := store.DefaultStore().RevokeAllSessionsForUser(req.AnonID)
+		if err != nil {
+			http.Error(w, "failed to revoke sessions", http.StatusInternalServerError)
+			return
+		}
+
+		// Log audit event
+		store.DefaultStore().LogAuditEvent(store.AuditLog{
+			Action: "revoke_all_sessions",
+			AnonID: "admin",
+			Details: strings.Join([]string{
+				"Revoked all sessions for anon_id: ", req.AnonID,
+				" (count: ", string(rune(count)), ")",
+			}, ""),
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":           "success",
+			"message":          "all sessions revoked",
+			"sessions_revoked": count,
+		})
+	}
+}
+
+// AdminGetUserSessions gets all sessions for a specific user
+func AdminGetUserSessions(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		anonID := r.URL.Query().Get("anon_id")
+		if anonID == "" {
+			http.Error(w, "anon_id required", http.StatusBadRequest)
+			return
+		}
+
+		sessions, err := store.DefaultStore().GetSessionsByAnonID(anonID)
+		if err != nil {
+			http.Error(w, "failed to get sessions", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"sessions": sessions,
+			"total":    len(sessions),
+		})
+	}
+}

@@ -42,6 +42,7 @@ func NewRouter(cfg config.Config) http.Handler {
 	r.Route("/session", func(sr chi.Router) {
 		sr.Post("/bootstrap", handlers.SessionBootstrap(cfg))
 		sr.With(SessionAuth(cfg)).Get("/me", handlers.SessionMe(cfg))
+		sr.With(SessionAuth(cfg)).Post("/refresh", handlers.SessionRefresh(cfg))
 	})
 
 	// -------- LINK CARDS --------
@@ -91,6 +92,9 @@ func NewRouter(cfg config.Config) http.Handler {
 		ar.Get("/users", handlers.AdminGetUsers(cfg))
 		ar.Get("/stats", handlers.AdminGetStats(cfg))
 		ar.Get("/sessions", handlers.AdminGetSessions(cfg))
+		ar.Get("/sessions/user", handlers.AdminGetUserSessions(cfg))
+		ar.Post("/sessions/revoke", handlers.AdminRevokeSession(cfg))
+		ar.Post("/sessions/revoke-all", handlers.AdminRevokeAllUserSessions(cfg))
 		ar.Get("/trust", handlers.AdminGetTrustGraph(cfg))
 		ar.Get("/abuse", handlers.AdminGetAbuseDashboard(cfg))
 		ar.Get("/audit", handlers.AdminGetAuditLog(cfg))

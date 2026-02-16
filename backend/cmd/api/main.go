@@ -15,6 +15,30 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// startSessionCleanupJob runs a background job to clean up expired sessions
+func startSessionCleanupJob() {
+	ticker := time.NewTicker(10 * time.Minute) // Run every 10 minutes
+	defer ticker.Stop()
+
+	// Run immediately on startup
+	cleanupSessions()
+
+	for range ticker.C {
+		cleanupSessions()
+	}
+}
+
+func cleanupSessions() {
+	count, err := store.DefaultStore().CleanupExpiredSessions()
+	if err != nil {
+		log.Printf("Session cleanup error: %v", err)
+		return
+	}
+	if count > 0 {
+		log.Printf("Cleaned up %d expired session(s)", count)
+	}
+}
+
 func main() {
 	// Load .env file if it exists
 	if err := godotenv.Load(); err != nil {
@@ -52,6 +76,9 @@ func main() {
 		store.Initialize(memStore)
 		log.Println("⚠ Using in-memory store (set DATABASE_URL for PostgreSQL)")
 	}
+
+	// Start session cleanup job
+	go startSessionCleanupJob()
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,

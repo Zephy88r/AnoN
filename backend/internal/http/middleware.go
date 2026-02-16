@@ -7,6 +7,7 @@ import (
 	"anon-backend/internal/config"
 	"anon-backend/internal/httpctx"
 	"anon-backend/internal/security"
+	"anon-backend/internal/store"
 )
 
 func SessionAuth(cfg config.Config) func(http.Handler) http.Handler {
@@ -24,6 +25,11 @@ func SessionAuth(cfg config.Config) func(http.Handler) http.Handler {
 				http.Error(w, "invalid token", http.StatusUnauthorized)
 				return
 			}
+
+			// Update session activity in background (don't block on errors)
+			go func() {
+				_ = store.DefaultStore().UpdateSessionActivity(token)
+			}()
 
 			ctx := httpctx.WithClaims(r.Context(), claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
