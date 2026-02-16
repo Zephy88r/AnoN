@@ -5,6 +5,8 @@ import {
     ShieldCheckIcon,
     ChatBubbleLeftRightIcon,
     DocumentTextIcon,
+    MagnifyingGlassIcon,
+    XMarkIcon,
 } from "@heroicons/react/24/outline";
 import AdminLayout from "../components/admin/AdminLayout";
 import StatCard from "../components/admin/StatCard";
@@ -60,6 +62,11 @@ export default function Admin() {
     const [trustLinks, setTrustLinks] = useState<TrustLink[]>([]);
     const [abuse, setAbuse] = useState<AbuseReport[]>([]);
     const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+
+    // Filter states
+    const [feedFilter, setFeedFilter] = useState("");
+    const [usersFilter, setUsersFilter] = useState("");
+    const [abuseFilter, setAbuseFilter] = useState("");
 
     const trustSummary = useMemo(() => {
         const summary = { pending: 0, accepted: 0, declined: 0 };
@@ -475,13 +482,58 @@ export default function Admin() {
         </div>
     );
 
-    const renderFeed = () => (
+    const renderFeed = () => {
+        const filteredPosts = posts.filter((post) => {
+            if (!feedFilter.trim()) return true;
+            const searchTerm = feedFilter.toLowerCase();
+            return (
+                post.text.toLowerCase().includes(searchTerm) ||
+                post.anon_id.toLowerCase().includes(searchTerm) ||
+                post.id.toLowerCase().includes(searchTerm)
+            );
+        });
+
+        return (
         <div className="space-y-6">
             <div>
                 <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Feed Posts</h1>
                 <p className="text-sm text-slate-700 dark:text-green-300/70">
                     Moderation and post management
                 </p>
+            </div>
+
+            {/* Search Bar */}
+            <div className="relative">
+                <div className="relative">
+                    <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 dark:text-green-400/70" />
+                    <input
+                        type="text"
+                        placeholder="Search by post content, Anon ID, or post ID..."
+                        value={feedFilter}
+                        onChange={(e) => setFeedFilter(e.target.value)}
+                        className="w-full pl-10 pr-10 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20
+                            bg-white/50 dark:bg-black/30 backdrop-blur
+                            text-slate-900 dark:text-green-100 placeholder:text-slate-500 dark:placeholder:text-green-400/50
+                            focus:outline-none focus:ring-2 focus:ring-emerald-500/50 dark:focus:ring-green-500/50
+                            transition-all"
+                    />
+                    {feedFilter && (
+                        <button
+                            type="button"
+                            onClick={() => setFeedFilter("")}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg
+                                text-slate-400 dark:text-green-400/70 hover:text-slate-600 dark:hover:text-green-300
+                                hover:bg-slate-100 dark:hover:bg-green-500/10 transition-colors"
+                        >
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
+                    )}
+                </div>
+                {feedFilter && (
+                    <p className="mt-2 text-sm text-slate-600 dark:text-green-300/70">
+                        Found {filteredPosts.length} of {posts.length} posts
+                    </p>
+                )}
             </div>
 
             <Panel>
@@ -525,21 +577,67 @@ export default function Admin() {
                             ),
                         },
                     ]}
-                    data={posts}
+                    data={filteredPosts}
                     keyExtractor={(p) => p.id}
-                    emptyMessage="No posts found"
+                    emptyMessage={feedFilter ? "No posts match your search" : "No posts found"}
                 />
             </Panel>
         </div>
-    );
+        );
+    };
 
-    const renderAbuse = () => (
+    const renderAbuse = () => {
+        const filteredAbuse = abuse.filter((report) => {
+            if (!abuseFilter.trim()) return true;
+            const searchTerm = abuseFilter.toLowerCase();
+            return (
+                report.anon_id.toLowerCase().includes(searchTerm) ||
+                report.rate_status.toLowerCase().includes(searchTerm) ||
+                report.post_count.toString().includes(searchTerm)
+            );
+        });
+
+        return (
         <div className="space-y-6">
             <div>
                 <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Abuse Monitor</h1>
                 <p className="text-sm text-slate-700 dark:text-green-300/70">
                     Rate limiting and abuse detection
                 </p>
+            </div>
+
+            {/* Search Bar */}
+            <div className="relative">
+                <div className="relative">
+                    <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 dark:text-green-400/70" />
+                    <input
+                        type="text"
+                        placeholder="Search by Anon ID, rate status, or post count..."
+                        value={abuseFilter}
+                        onChange={(e) => setAbuseFilter(e.target.value)}
+                        className="w-full pl-10 pr-10 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20
+                            bg-white/50 dark:bg-black/30 backdrop-blur
+                            text-slate-900 dark:text-green-100 placeholder:text-slate-500 dark:placeholder:text-green-400/50
+                            focus:outline-none focus:ring-2 focus:ring-emerald-500/50 dark:focus:ring-green-500/50
+                            transition-all"
+                    />
+                    {abuseFilter && (
+                        <button
+                            type="button"
+                            onClick={() => setAbuseFilter("")}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg
+                                text-slate-400 dark:text-green-400/70 hover:text-slate-600 dark:hover:text-green-300
+                                hover:bg-slate-100 dark:hover:bg-green-500/10 transition-colors"
+                        >
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
+                    )}
+                </div>
+                {abuseFilter && (
+                    <p className="mt-2 text-sm text-slate-600 dark:text-green-300/70">
+                        Found {filteredAbuse.length} of {abuse.length} reports
+                    </p>
+                )}
             </div>
 
             <Panel description="Highlights accounts with abnormal posting volume. No IP data is collected.">
@@ -572,13 +670,14 @@ export default function Admin() {
                             ),
                         },
                     ]}
-                    data={abuse}
+                    data={filteredAbuse}
                     keyExtractor={(r) => r.anon_id}
-                    emptyMessage="No abuse signals detected"
+                    emptyMessage={abuseFilter ? "No reports match your search" : "No abuse signals detected"}
                 />
             </Panel>
         </div>
-    );
+        );
+    };
 
     const renderAudit = () => (
         <div className="space-y-6">
@@ -628,13 +727,57 @@ export default function Admin() {
         </div>
     );
 
-    const renderUsers = () => (
+    const renderUsers = () => {
+        const filteredUsers = users.filter((user) => {
+            if (!usersFilter.trim()) return true;
+            const searchTerm = usersFilter.toLowerCase();
+            return (
+                user.anon_id.toLowerCase().includes(searchTerm) ||
+                user.post_count.toString().includes(searchTerm)
+            );
+        });
+
+        return (
         <div className="space-y-6">
             <div>
                 <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Users</h1>
                 <p className="text-sm text-slate-700 dark:text-green-300/70">
                     User accounts overview
                 </p>
+            </div>
+
+            {/* Search Bar */}
+            <div className="relative">
+                <div className="relative">
+                    <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 dark:text-green-400/70" />
+                    <input
+                        type="text"
+                        placeholder="Search by Anon ID or post count..."
+                        value={usersFilter}
+                        onChange={(e) => setUsersFilter(e.target.value)}
+                        className="w-full pl-10 pr-10 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20
+                            bg-white/50 dark:bg-black/30 backdrop-blur
+                            text-slate-900 dark:text-green-100 placeholder:text-slate-500 dark:placeholder:text-green-400/50
+                            focus:outline-none focus:ring-2 focus:ring-emerald-500/50 dark:focus:ring-green-500/50
+                            transition-all"
+                    />
+                    {usersFilter && (
+                        <button
+                            type="button"
+                            onClick={() => setUsersFilter("")}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg
+                                text-slate-400 dark:text-green-400/70 hover:text-slate-600 dark:hover:text-green-300
+                                hover:bg-slate-100 dark:hover:bg-green-500/10 transition-colors"
+                        >
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
+                    )}
+                </div>
+                {usersFilter && (
+                    <p className="mt-2 text-sm text-slate-600 dark:text-green-300/70">
+                        Found {filteredUsers.length} of {users.length} users
+                    </p>
+                )}
             </div>
 
             <Panel>
@@ -663,13 +806,14 @@ export default function Admin() {
                             ),
                         },
                     ]}
-                    data={users}
+                    data={filteredUsers}
                     keyExtractor={(u) => u.anon_id}
-                    emptyMessage="No users found"
+                    emptyMessage={usersFilter ? "No users match your search" : "No users found"}
                 />
             </Panel>
         </div>
-    );
+        );
+    };
 
     const renderPlaceholder = (title: string) => (
         <div className="space-y-6">
