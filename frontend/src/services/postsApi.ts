@@ -3,6 +3,7 @@ import { apiFetch } from "./api";
 export type ApiPost = {
     id: string;
     anon_id: string;
+    username?: string;
     text: string;
     created_at: string;
     likes: number;
@@ -55,6 +56,7 @@ export type ApiComment = {
     id: string;
     post_id: string;
     anon_id: string;
+    username?: string;
     text: string;
     created_at: string;
     likes: number;
@@ -104,6 +106,7 @@ export type ApiCommentReply = {
     id: string;
     comment_id: string;
     anon_id: string;
+    username?: string;
     text: string;
     created_at: string;
     deleted: boolean;

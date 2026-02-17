@@ -81,6 +81,7 @@ func PostSearch(cfg config.Config) http.HandlerFunc {
 				Post: types.PostDTO{
 					ID:           result.Post.ID,
 					AnonID:       result.Post.AnonID,
+					Username:     getUsernameByAnonID(result.Post.AnonID),
 					Text:         result.Post.Text,
 					CreatedAt:    result.Post.CreatedAt.Format(time.RFC3339),
 					Likes:        result.Post.Likes,

@@ -13,6 +13,15 @@ import (
 	"anon-backend/internal/types"
 )
 
+// getUsernameByAnonID retrieves the username for a given anon_id from the devices table
+func getUsernameByAnonID(anonID string) string {
+	device, err := store.DefaultStore().GetDeviceByAnonID(anonID)
+	if err != nil || device == nil {
+		return "" // Return empty if not found
+	}
+	return device.Username
+}
+
 func PostCreate(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims := httpctx.ClaimsFromContext(r.Context())
@@ -76,6 +85,7 @@ func PostCreate(cfg config.Config) http.HandlerFunc {
 			Post: types.PostDTO{
 				ID:           post.ID,
 				AnonID:       post.AnonID,
+				Username:     getUsernameByAnonID(post.AnonID),
 				Text:         post.Text,
 				CreatedAt:    post.CreatedAt.Format(time.RFC3339),
 				Likes:        post.Likes,
@@ -107,6 +117,7 @@ func PostFeed(cfg config.Config) http.HandlerFunc {
 			out[i] = types.PostDTO{
 				ID:           post.ID,
 				AnonID:       post.AnonID,
+				Username:     getUsernameByAnonID(post.AnonID),
 				Text:         post.Text,
 				CreatedAt:    post.CreatedAt.Format(time.RFC3339),
 				Likes:        post.Likes,
@@ -205,6 +216,7 @@ func PostLike(cfg config.Config) http.HandlerFunc {
 		_ = json.NewEncoder(w).Encode(types.PostDTO{
 			ID:           post.ID,
 			AnonID:       post.AnonID,
+			Username:     getUsernameByAnonID(post.AnonID),
 			Text:         post.Text,
 			CreatedAt:    post.CreatedAt.Format(time.RFC3339),
 			Likes:        post.Likes,
@@ -254,6 +266,7 @@ func PostDislike(cfg config.Config) http.HandlerFunc {
 		_ = json.NewEncoder(w).Encode(types.PostDTO{
 			ID:           post.ID,
 			AnonID:       post.AnonID,
+			Username:     getUsernameByAnonID(post.AnonID),
 			Text:         post.Text,
 			CreatedAt:    post.CreatedAt.Format(time.RFC3339),
 			Likes:        post.Likes,

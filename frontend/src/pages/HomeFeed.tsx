@@ -7,6 +7,11 @@ import { createPost, fetchFeed, deletePost, likePost, dislikePost, getRemainingP
 import type { ApiPost, ApiComment, ApiCommentReply, ApiSearchResult } from "../services/postsApi";
 import { getMyAnonId } from "../services/session";
 
+// Helper to display username or fallback
+const displayUsername = (username?: string, anonId?: string): string => {
+    return username || `User #${anonId?.substring(0, 8) || 'unknown'}`;
+};
+
 export default function HomeFeed() {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -590,7 +595,7 @@ export default function HomeFeed() {
                                 {/* Post Header */}
                                 <div className="flex items-center justify-between">
                                     <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
-                                        User #{post.anon_id.substring(0, 8)}
+                                        {displayUsername(post.username, post.anon_id)}
                                     </span>
                                     <div className="flex items-center gap-3">
                                         <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">
@@ -732,7 +737,7 @@ export default function HomeFeed() {
                 >
                 <div className="flex items-center justify-between mb-2">
                     <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
-                    User #{post.anon_id.substring(0, 8)}
+                    {displayUsername(post.username, post.anon_id)}
                     </span>
                     <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">
                     {timeAgo(post.created_at)}
@@ -900,7 +905,7 @@ export default function HomeFeed() {
                                         <div className="flex items-start justify-between gap-2">
                                             <div className="flex-1">
                                                 <div className="text-xs font-mono text-slate-500 dark:text-green-300/60 mb-1">
-                                                    User #{comment.anon_id.substring(0, 8)} • {timeAgo(comment.created_at)}
+                                                    {displayUsername(comment.username, comment.anon_id)} • {timeAgo(comment.created_at)}
                                                 </div>
                                                 <div className="text-sm text-slate-800 dark:text-green-300 break-words">
                                                     {renderTextWithMentions(comment.text)}
@@ -1011,7 +1016,7 @@ export default function HomeFeed() {
                                                                         <div className="flex items-start justify-between gap-2">
                                                                             <div className="flex-1">
                                                                                 <div className="text-xs font-mono text-slate-500 dark:text-green-300/60 mb-1">
-                                                                                    User #{reply.anon_id.substring(0, 8)} • {timeAgo(reply.created_at)}
+                                                                                    {displayUsername(reply.username, reply.anon_id)} • {timeAgo(reply.created_at)}
                                                                                 </div>
                                                                                 <div className="text-sm text-slate-800 dark:text-green-300 break-words">
                                                                                     {renderTextWithMentions(reply.text)}
@@ -1213,7 +1218,7 @@ export default function HomeFeed() {
             }}
             targetLabel={
             pendingPostId != null
-                ? `User #${483920 + pendingPostId} • Post ${pendingPostId}`
+                ? `Post ${pendingPostId}`
                 : undefined
             }
             maxChars={200}

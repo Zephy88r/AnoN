@@ -297,14 +297,13 @@ func SessionRefresh(cfg config.Config) http.HandlerFunc {
 }
 
 func generateUsernameCandidate() (string, error) {
-	b := make([]byte, 3)
+	b := make([]byte, 2)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	if b[0]%2 == 0 {
-		return fmt.Sprintf("ghost_%x", b[:2]), nil
-	}
-	return fmt.Sprintf("ghost_%x", b[:3]), nil
+	// Convert 2 random bytes to a number in range [10000, 99999]
+	num := (uint32(b[0])<<8|uint32(b[1]))%90000 + 10000
+	return fmt.Sprintf("ghost_%05d", num), nil
 }
 
 func isNotFoundErr(err error) bool {

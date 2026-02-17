@@ -7,6 +7,7 @@ type PostCreateRequest struct {
 type PostDTO struct {
 	ID           string `json:"id"`
 	AnonID       string `json:"anon_id"`
+	Username     string `json:"username,omitempty"`
 	Text         string `json:"text"`
 	CreatedAt    string `json:"created_at"` // ISO 8601
 	Likes        int    `json:"likes"`
@@ -36,6 +37,7 @@ type CommentDTO struct {
 	ID           string `json:"id"`
 	PostID       string `json:"post_id"`
 	AnonID       string `json:"anon_id"`
+	Username     string `json:"username,omitempty"`
 	Text         string `json:"text"`
 	CreatedAt    string `json:"created_at"`
 	Likes        int    `json:"likes"`
@@ -61,6 +63,7 @@ type CommentReactionRequest struct {
 type CommentReplyDTO struct {
 	ID           string `json:"id"`
 	CommentID    string `json:"comment_id"`
+	Username     string `json:"username,omitempty"`
 	AnonID       string `json:"anon_id"`
 	Text         string `json:"text"`
 	CreatedAt    string `json:"created_at"`

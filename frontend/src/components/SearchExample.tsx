@@ -4,6 +4,11 @@
 import { useState } from 'react';
 import { searchPosts, ApiSearchResult } from '../services/postsApi';
 
+// Helper to display username or fallback
+const displayUsername = (username?: string, anonId?: string): string => {
+    return username || `User #${anonId?.substring(0, 8) || 'unknown'}`;
+};
+
 export default function SearchExample() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ApiSearchResult[]>([]);
@@ -120,7 +125,7 @@ export default function SearchExample() {
               {/* Post Header */}
               <div className="flex items-center justify-between">
                 <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
-                  User #{result.post.anon_id.substring(0, 8)}
+                  {displayUsername(result.post.username, result.post.anon_id)}
                 </span>
                 <div className="flex items-center gap-3">
                   <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">

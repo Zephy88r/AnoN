@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { getAnonDeviceKey } from "../services/geo";
-import { logout } from "../services/session";
+import { logout, getMyUsername } from "../services/session";
 
 const card =
     "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-4";
@@ -15,6 +15,8 @@ export default function Settings() {
         .replace("dev_", "")
         .slice(0, 8)
         .toUpperCase();
+    
+    const username = getMyUsername();
 
     return (
         <div className="mx-auto w-full max-w-3xl space-y-6">
@@ -95,10 +97,23 @@ export default function Settings() {
 
             <div className="flex items-center justify-between">
             <span className="text-slate-800 dark:text-green-200">
-                Anonymous ID
+                Username
             </span>
             <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
-                User #{anonId}
+                {username || "Not set"}
+            </span>
+            </div>
+
+            <div className="mt-1 text-xs text-slate-600 dark:text-green-300/70">
+            Your display name shown in posts and comments.
+            </div>
+
+            <div className="mt-4 flex items-center justify-between">
+            <span className="text-slate-800 dark:text-green-200">
+                Device ID
+            </span>
+            <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
+                {anonId}
             </span>
             </div>
 
@@ -125,7 +140,9 @@ export default function Settings() {
                 logout();
                 navigate("/");
                 }}
-                className="w-full rounded-xl border border-emerald-500/30 dark:border-green-500/30 bg-emerald-500/10 dark:bg-green-500/10 hover:bg-emerald-500/20 dark:hover:bg-green-500/20 px-4 py-2 text-sm font-mono text-emerald-700 dark:text-green-200 transition"
+                className="w-full  gap-3 px-3 py-2.5 rounded-xl text-lm font-medium
+                        text-red-600 dark:text-red-400 hover:bg-red-500/10 dark:hover:bg-red-500/10
+                        border border-red-500/20 dark:border-red-500/20 transition-colors"
             >
                 Logout
             </button>
