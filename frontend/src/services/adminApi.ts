@@ -144,3 +144,17 @@ export async function revokeAllUserSessions(anonID: string) {
 export async function fetchUserSessions(anonID: string) {
     return adminFetch<{ sessions: AdminSession[]; total: number }>(`/sessions/user?anon_id=${anonID}`);
 }
+
+export async function deleteAuditLogs(ids: string[]) {
+    return adminFetch<{ status: string; message: string; count: number }>("/audit/delete-batch", {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+    });
+}
+
+export async function clearAuditLogs() {
+    return adminFetch<{ status: string; message: string }>("/audit/clear", {
+        method: "POST",
+        body: JSON.stringify({}),
+    });
+}

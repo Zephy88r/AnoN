@@ -103,6 +103,9 @@ func NewRouter(cfg config.Config) http.Handler {
 		ar.Get("/trust", handlers.AdminGetTrustGraph(cfg))
 		ar.Get("/abuse", handlers.AdminGetAbuseDashboard(cfg))
 		ar.Get("/audit", handlers.AdminGetAuditLog(cfg))
+		ar.Post("/audit/delete", handlers.AdminDeleteAuditLog(cfg))
+		ar.Post("/audit/delete-batch", handlers.AdminDeleteAuditLogs(cfg))
+		ar.Post("/audit/clear", handlers.AdminClearAuditLogs(cfg))
 		ar.Get("/health", handlers.AdminGetHealth(cfg))
 	})
 

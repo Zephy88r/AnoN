@@ -3,7 +3,7 @@ import { useRef, useEffect } from "react";
 
 type Column<T> = {
     key: string;
-    label: string;
+    label: string | ReactNode;
     render?: (item: T) => ReactNode;
     className?: string;
 };
@@ -55,8 +55,8 @@ export default function DataTable<T>({
                                 />
                             </th>
                         )}
-                        {columns.map((col) => (
-                            <th key={col.key} className={`text-left py-2 ${col.className || ""}`}>
+                        {columns.map((col, colIndex) => (
+                            <th key={`header-${col.key}-${colIndex}`} className={`text-left py-2 ${col.className || ""}`}>
                                 {col.label}
                             </th>
                         ))}
@@ -91,8 +91,17 @@ export default function DataTable<T>({
                                             />
                                         </td>
                                     )}
-                                    {columns.map((col) => (
-                                        <td key={col.key} className={`py-3 ${col.className || ""}`}>
+                                    {columns.map((col, colIdx) => (
+                                        <td 
+                                            key={`${key}-${col.key}`} 
+                                            className={`py-3 ${col.className || ""}`}
+                                            onClick={(e) => {
+                                                // Prevent row click from affecting checkbox
+                                                if (col.key === 'select') {
+                                                    e.stopPropagation();
+                                                }
+                                            }}
+                                        >
                                             {col.render ? col.render(item) : String((item as Record<string, unknown>)[col.key])}
                                         </td>
                                     ))}

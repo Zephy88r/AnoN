@@ -53,6 +53,9 @@ type Store interface {
 	GetAuditLogs() []AuditLog
 	DeletePost(postID string) error
 	LogAuditEvent(event AuditLog)
+	DeleteAuditLog(id string) error
+	DeleteAuditLogs(ids []string) error
+	ClearAuditLogs() error
 	PutSession(session SessionInfo) error
 
 	// Device auth

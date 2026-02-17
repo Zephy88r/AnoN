@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // PgStore implements Store using PostgreSQL backend.
@@ -733,6 +735,38 @@ func (s *PgStore) LogAuditEvent(event AuditLog) {
 	if err != nil {
 		fmt.Printf("error logging audit event: %v\n", err)
 	}
+}
+
+func (s *PgStore) DeleteAuditLog(id string) error {
+	query := `DELETE FROM audit_logs WHERE id = $1`
+	_, err := s.db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("delete audit log: %w", err)
+	}
+	return nil
+}
+
+func (s *PgStore) DeleteAuditLogs(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// Build the DELETE query with placeholders
+	query := `DELETE FROM audit_logs WHERE id = ANY($1)`
+	_, err := s.db.Exec(query, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("delete audit logs: %w", err)
+	}
+	return nil
+}
+
+func (s *PgStore) ClearAuditLogs() error {
+	query := `DELETE FROM audit_logs`
+	_, err := s.db.Exec(query)
+	if err != nil {
+		return fmt.Errorf("clear audit logs: %w", err)
+	}
+	return nil
 }
 
 // GetPost retrieves a post by ID

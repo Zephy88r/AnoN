@@ -746,6 +746,45 @@ func (s *MemStore) LogAuditEvent(event AuditLog) {
 	s.auditLogs = append(s.auditLogs, event)
 }
 
+func (s *MemStore) DeleteAuditLog(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i, log := range s.auditLogs {
+		if log.ID == id {
+			s.auditLogs = append(s.auditLogs[:i], s.auditLogs[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *MemStore) DeleteAuditLogs(ids []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idMap := make(map[string]bool)
+	for _, id := range ids {
+		idMap[id] = true
+	}
+
+	filtered := make([]AuditLog, 0)
+	for _, log := range s.auditLogs {
+		if !idMap[log.ID] {
+			filtered = append(filtered, log)
+		}
+	}
+	s.auditLogs = filtered
+	return nil
+}
+
+func (s *MemStore) ClearAuditLogs() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.auditLogs = make([]AuditLog, 0)
+	return nil
+}
+
 // GetPost retrieves a post by ID
 func (s *MemStore) GetPost(postID string) (*Post, bool) {
 	s.mu.RLock()

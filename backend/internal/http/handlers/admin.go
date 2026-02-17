@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -475,6 +476,97 @@ func AdminGetUserSessions(cfg config.Config) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"sessions": sessions,
 			"total":    len(sessions),
+		})
+	}
+}
+
+// AdminDeleteAuditLog deletes a single audit log entry
+func AdminDeleteAuditLog(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID string `json:"id"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		if req.ID == "" {
+			http.Error(w, "id required", http.StatusBadRequest)
+			return
+		}
+
+		if err := store.DefaultStore().DeleteAuditLog(req.ID); err != nil {
+			http.Error(w, "failed to delete audit log", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": "audit log deleted",
+		})
+	}
+}
+
+// AdminDeleteAuditLogs deletes multiple audit log entries
+func AdminDeleteAuditLogs(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			IDs []string `json:"ids"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		if len(req.IDs) == 0 {
+			http.Error(w, "ids required", http.StatusBadRequest)
+			return
+		}
+
+		if err := store.DefaultStore().DeleteAuditLogs(req.IDs); err != nil {
+			http.Error(w, "failed to delete audit logs", http.StatusInternalServerError)
+			return
+		}
+
+		// Log the deletion action
+		store.DefaultStore().LogAuditEvent(store.AuditLog{
+			Action:  "delete_audit_logs",
+			AnonID:  "admin",
+			Details: fmt.Sprintf("deleted %d audit log entries", len(req.IDs)),
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": fmt.Sprintf("%d audit logs deleted", len(req.IDs)),
+			"count":   len(req.IDs),
+		})
+	}
+}
+
+// AdminClearAuditLogs clears all audit log entries
+func AdminClearAuditLogs(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := store.DefaultStore().ClearAuditLogs(); err != nil {
+			http.Error(w, "failed to clear audit logs", http.StatusInternalServerError)
+			return
+		}
+
+		// Log the clear action
+		store.DefaultStore().LogAuditEvent(store.AuditLog{
+			Action:  "clear_audit_logs",
+			AnonID:  "admin",
+			Details: "cleared all audit log entries",
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": "all audit logs cleared",
 		})
 	}
 }

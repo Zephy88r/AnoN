@@ -7,6 +7,7 @@ import {
     DocumentTextIcon,
     MagnifyingGlassIcon,
     XMarkIcon,
+    ArrowDownTrayIcon,
 } from "@heroicons/react/24/outline";
 import AdminLayout from "../components/admin/AdminLayout";
 import StatCard from "../components/admin/StatCard";
@@ -18,6 +19,8 @@ import { formatAdminTime } from "../utils/formatTime";
 import {
     clearAdminToken,
     deleteAdminPost,
+    deleteAuditLogs,
+    clearAuditLogs,
     fetchAdminAbuse,
     fetchAdminAudit,
     fetchAdminHealth,
@@ -69,6 +72,7 @@ export default function Admin() {
     const [feedFilter, setFeedFilter] = useState("");
     const [usersFilter, setUsersFilter] = useState("");
     const [abuseFilter, setAbuseFilter] = useState("");
+    const [auditFilter, setAuditFilter] = useState("");
 
     // Revoke session modal state
     const [revokeModalOpen, setRevokeModalOpen] = useState(false);
@@ -76,6 +80,11 @@ export default function Admin() {
 
     // Session selection state
     const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
+
+    // Audit log selection state
+    const [selectedAuditLogs, setSelectedAuditLogs] = useState<Set<string>>(new Set());
+    const [deleteAuditModalOpen, setDeleteAuditModalOpen] = useState(false);
+    const [clearAuditModalOpen, setClearAuditModalOpen] = useState(false);
 
     const trustSummary = useMemo(() => {
         const summary = { pending: 0, accepted: 0, declined: 0 };
@@ -219,6 +228,126 @@ export default function Admin() {
             const msg = err instanceof Error ? err.message : "Failed to revoke sessions";
             setError(msg);
         }
+    };
+
+    // Audit log handlers
+    const handleSelectAuditLog = (id: string) => {
+        setSelectedAuditLogs((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+            return next;
+        });
+    };
+
+    const handleSelectAllAuditLogs = (isSelected: boolean, filteredLogs: AuditLog[]) => {
+        if (isSelected) {
+            // Add all filtered log IDs to selection
+            setSelectedAuditLogs((prev) => {
+                const next = new Set(prev);
+                filteredLogs.forEach((log) => next.add(log.id));
+                return next;
+            });
+        } else {
+            // Remove all filtered log IDs from selection
+            setSelectedAuditLogs((prev) => {
+                const next = new Set(prev);
+                filteredLogs.forEach((log) => next.delete(log.id));
+                return next;
+            });
+        }
+    };
+
+    const handleDeleteAuditLogsClick = () => {
+        if (selectedAuditLogs.size === 0) return;
+        setDeleteAuditModalOpen(true);
+    };
+
+    const handleConfirmDeleteAuditLogs = async () => {
+        if (selectedAuditLogs.size === 0) return;
+
+        try {
+            await deleteAuditLogs(Array.from(selectedAuditLogs));
+            setAuditLogs((prev) => prev.filter((log) => !selectedAuditLogs.has(log.id)));
+            setSelectedAuditLogs(new Set());
+            setDeleteAuditModalOpen(false);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to delete audit logs";
+            setError(msg);
+        }
+    };
+
+    const handleClearAuditLogsClick = () => {
+        setClearAuditModalOpen(true);
+    };
+
+    const handleConfirmClearAuditLogs = async () => {
+        try {
+            await clearAuditLogs();
+            setAuditLogs([]);
+            setSelectedAuditLogs(new Set());
+            setClearAuditModalOpen(false);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to clear audit logs";
+            setError(msg);
+        }
+    };
+
+    const handleExportAuditLogs = (format: 'csv' | 'json') => {
+        const logsToExport = auditFilter ? auditLogs.filter((log) => {
+            const searchTerm = auditFilter.toLowerCase();
+            return (
+                log.action.toLowerCase().includes(searchTerm) ||
+                log.anon_id.toLowerCase().includes(searchTerm) ||
+                log.details.toLowerCase().includes(searchTerm)
+            );
+        }) : auditLogs;
+
+        if (logsToExport.length === 0) {
+            setError("No logs to export");
+            return;
+        }
+
+        let content: string;
+        let filename: string;
+        let mimeType: string;
+
+        if (format === 'csv') {
+            // CSV format
+            const headers = ['ID', 'Action', 'Actor', 'Details', 'Timestamp'];
+            const rows = logsToExport.map(log => [
+                log.id || '',
+                log.action || '',
+                log.anon_id || '',
+                (log.details || '').replace(/"/g, '""'), // Escape quotes and handle null/undefined
+                log.timestamp || ''
+            ]);
+            content = [
+                headers.join(','),
+                ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+            ].join('\n');
+            filename = `audit-logs-${new Date().toISOString().split('T')[0]}.csv`;
+            mimeType = 'text/csv';
+        } else {
+            // JSON format
+            content = JSON.stringify(logsToExport, null, 2);
+            filename = `audit-logs-${new Date().toISOString().split('T')[0]}.json`;
+            mimeType = 'application/json';
+        }
+
+        // Create and trigger download
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     };
 
     const maskToken = (token: string) => {
@@ -791,18 +920,155 @@ export default function Admin() {
         );
     };
 
-    const renderAudit = () => (
+    const renderAudit = () => {
+        const filteredAuditLogs = auditLogs.filter((log) => {
+            if (!auditFilter.trim()) return true;
+            const searchTerm = auditFilter.toLowerCase();
+            return (
+                log.action.toLowerCase().includes(searchTerm) ||
+                log.anon_id.toLowerCase().includes(searchTerm) ||
+                log.details.toLowerCase().includes(searchTerm)
+            );
+        });
+
+        console.log('Filtered logs:', filteredAuditLogs.map(log => ({ id: log.id, action: log.action })));
+        console.log('Selected logs:', Array.from(selectedAuditLogs));
+
+        const allSelected = filteredAuditLogs.length > 0 && filteredAuditLogs.every((log) => selectedAuditLogs.has(log.id));
+
+        return (
         <div className="space-y-6">
-            <div>
-                <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Audit Log</h1>
-                <p className="text-sm text-slate-700 dark:text-green-300/70">
-                    Admin actions and compliance tracking
-                </p>
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Audit Log</h1>
+                    <p className="text-sm text-slate-700 dark:text-green-300/70">
+                        Admin actions and compliance tracking
+                    </p>
+                </div>
+                <div className="flex gap-2">
+                    <button
+                        type="button"
+                        onClick={() => handleExportAuditLogs('csv')}
+                        disabled={auditLogs.length === 0}
+                        className="rounded-xl px-4 py-2 text-sm font-mono border border-emerald-500/30 dark:border-green-500/30
+                            bg-emerald-500/10 dark:bg-green-500/10 text-emerald-800 dark:text-green-300 
+                            hover:bg-emerald-500/20 dark:hover:bg-green-500/20
+                            disabled:opacity-50 disabled:cursor-not-allowed transition-colors
+                            flex items-center gap-2"
+                    >
+                        <ArrowDownTrayIcon className="h-4 w-4" />
+                        Export CSV
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => handleExportAuditLogs('json')}
+                        disabled={auditLogs.length === 0}
+                        className="rounded-xl px-4 py-2 text-sm font-mono border border-emerald-500/30 dark:border-green-500/30
+                            bg-emerald-500/10 dark:bg-green-500/10 text-emerald-800 dark:text-green-300 
+                            hover:bg-emerald-500/20 dark:hover:bg-green-500/20
+                            disabled:opacity-50 disabled:cursor-not-allowed transition-colors
+                            flex items-center gap-2"
+                    >
+                        <ArrowDownTrayIcon className="h-4 w-4" />
+                        Export JSON
+                    </button>
+                    {selectedAuditLogs.size > 0 && (
+                        <button
+                            type="button"
+                            onClick={handleDeleteAuditLogsClick}
+                            className="rounded-xl px-4 py-2 text-sm font-mono border border-red-500/30
+                                bg-red-500/10 text-red-800 dark:text-red-300 
+                                hover:bg-red-500/20 transition-colors"
+                        >
+                            Delete Selected ({selectedAuditLogs.size})
+                        </button>
+                    )}
+                    <button
+                        type="button"
+                        onClick={handleClearAuditLogsClick}
+                        disabled={auditLogs.length === 0}
+                        className="rounded-xl px-4 py-2 text-sm font-mono border border-red-500/30
+                            bg-red-500/10 text-red-800 dark:text-red-300 
+                            hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                        Clear All
+                    </button>
+                </div>
+            </div>
+
+            {/* Search Bar */}
+            <div className="relative">
+                <div className="relative">
+                    <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 dark:text-green-400/70" />
+                    <input
+                        type="text"
+                        placeholder="Search by action, actor, or details..."
+                        value={auditFilter}
+                        onChange={(e) => setAuditFilter(e.target.value)}
+                        className="w-full pl-10 pr-10 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20
+                            bg-white/50 dark:bg-black/30 backdrop-blur
+                            text-slate-900 dark:text-green-100 placeholder:text-slate-500 dark:placeholder:text-green-400/50
+                            focus:outline-none focus:ring-2 focus:ring-emerald-500/50 dark:focus:ring-green-500/50
+                            transition-all"
+                    />
+                    {auditFilter && (
+                        <button
+                            type="button"
+                            onClick={() => setAuditFilter("")}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg
+                                text-slate-400 dark:text-green-400/70 hover:text-slate-600 dark:hover:text-green-300
+                                hover:bg-slate-100 dark:hover:bg-green-500/10 transition-colors"
+                        >
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
+                    )}
+                </div>
+                {auditFilter && (
+                    <p className="mt-2 text-sm text-slate-600 dark:text-green-300/70">
+                        Found {filteredAuditLogs.length} of {auditLogs.length} logs
+                    </p>
+                )}
             </div>
 
             <Panel description="Tracks admin moderation actions for accountability">
                 <DataTable
                     columns={[
+                        {
+                            key: "select",
+                            label: (
+                                <input
+                                    type="checkbox"
+                                    checked={allSelected}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        handleSelectAllAuditLogs(e.target.checked, filteredAuditLogs);
+                                    }}
+                                    className="rounded border-emerald-500/30 dark:border-green-500/30 
+                                        bg-white/50 dark:bg-black/30
+                                        text-emerald-600 dark:text-green-500
+                                        focus:ring-2 focus:ring-emerald-500/50 dark:focus:ring-green-500/50"
+                                />
+                            ),
+                            render: (log: AuditLog) => (
+                                <div onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedAuditLogs.has(log.id)}
+                                        onChange={(e) => {
+                                            e.stopPropagation();
+                                            console.log('Toggle log:', log.id, 'Current selected:', Array.from(selectedAuditLogs));
+                                            handleSelectAuditLog(log.id);
+                                        }}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onKeyDown={(e) => e.stopPropagation()}
+                                        className="rounded border-emerald-500/30 dark:border-green-500/30 
+                                            bg-white/50 dark:bg-black/30
+                                            text-emerald-600 dark:text-green-500
+                                            focus:ring-2 focus:ring-emerald-500/50 dark:focus:ring-green-500/50"
+                                    />
+                                </div>
+                            ),
+                        },
                         {
                             key: "action",
                             label: "Action",
@@ -831,13 +1097,14 @@ export default function Admin() {
                             ),
                         },
                     ]}
-                    data={auditLogs}
+                    data={filteredAuditLogs}
                     keyExtractor={(log) => log.id}
-                    emptyMessage="No audit events recorded"
+                    emptyMessage={auditFilter ? "No logs match your search" : "No audit events recorded"}
                 />
             </Panel>
         </div>
-    );
+        );
+    };
 
     const renderUsers = () => {
         const filteredUsers = users.filter((user) => {
@@ -1006,6 +1273,30 @@ export default function Admin() {
                         : `Are you sure you want to revoke ${selectedSessions.size} session${selectedSessions.size !== 1 ? 's' : ''}? All selected users will be forced to logout immediately.`
                 }
                 confirmText={sessionToRevoke ? "Revoke Session" : `Revoke ${selectedSessions.size} Session${selectedSessions.size !== 1 ? 's' : ''}`}
+                cancelText="Cancel"
+                danger={true}
+            />
+
+            {/* Delete Audit Logs Confirmation Modal */}
+            <ConfirmationModal
+                open={deleteAuditModalOpen}
+                onClose={() => setDeleteAuditModalOpen(false)}
+                onConfirm={handleConfirmDeleteAuditLogs}
+                title="Delete Audit Logs"
+                message={`Are you sure you want to delete ${selectedAuditLogs.size} audit log${selectedAuditLogs.size !== 1 ? 's' : ''}? This action cannot be undone.`}
+                confirmText={`Delete ${selectedAuditLogs.size} Log${selectedAuditLogs.size !== 1 ? 's' : ''}`}
+                cancelText="Cancel"
+                danger={true}
+            />
+
+            {/* Clear All Audit Logs Confirmation Modal */}
+            <ConfirmationModal
+                open={clearAuditModalOpen}
+                onClose={() => setClearAuditModalOpen(false)}
+                onConfirm={handleConfirmClearAuditLogs}
+                title="Clear All Audit Logs"
+                message="Are you sure you want to clear ALL audit logs? This will permanently delete all audit trail records and cannot be undone."
+                confirmText="Clear All Logs"
                 cancelText="Cancel"
                 danger={true}
             />
