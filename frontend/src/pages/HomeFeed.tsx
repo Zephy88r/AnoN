@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import TrustRequestModal from "../components/TrustRequestModal";
 import { useTrust } from "../contexts/TrustContext";
 import { ensureThreadForPeer } from "../services/thread";
-import { createPost, fetchFeed, deletePost, likePost, dislikePost, getRemainingPosts, createComment, getComments, deleteComment, likeComment, dislikeComment, createCommentReply, getCommentReplies, deleteCommentReply, searchPosts } from "../services/postsApi";
+import { createPost, fetchFeed, deletePost, likePost, dislikePost, getRemainingPosts, createComment, getComments, deleteComment, likeComment, dislikeComment, createCommentReply, getCommentReplies, deleteCommentReply, likeCommentReply, dislikeCommentReply, searchPosts } from "../services/postsApi";
 import type { ApiPost, ApiComment, ApiCommentReply, ApiSearchResult } from "../services/postsApi";
 import { getMyAnonId } from "../services/session";
 
@@ -165,7 +165,7 @@ export default function HomeFeed() {
         try {
             const updatedPost = await likePost(postId);
             // Update post in UI
-            setPosts(posts.map(p => p.id === postId ? updatedPost : p));
+            setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
         } catch (err) {
             console.error("Failed to like post:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to like post";
@@ -177,7 +177,7 @@ export default function HomeFeed() {
         try {
             const updatedPost = await dislikePost(postId);
             // Update post in UI
-            setPosts(posts.map(p => p.id === postId ? updatedPost : p));
+            setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
         } catch (err) {
             console.error("Failed to dislike post:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to dislike post";
@@ -217,12 +217,6 @@ export default function HomeFeed() {
                 ...comments,
                 [postId]: [...(comments[postId] || []), newComment]
             });
-            // Update comment count on post
-            setPosts(posts.map(p => 
-                p.id === postId 
-                    ? { ...p, comments_count: (p.comments_count || 0) + 1 }
-                    : p
-            ));
             // Clear input
             setCommentText({ ...commentText, [postId]: "" });
         } catch (err) {
@@ -243,12 +237,6 @@ export default function HomeFeed() {
                 ...comments,
                 [postId]: comments[postId].filter(c => c.id !== commentId)
             });
-            // Update comment count on post
-            setPosts(posts.map(p => 
-                p.id === postId 
-                    ? { ...p, comments_count: Math.max(0, (p.comments_count || 0) - 1) }
-                    : p
-            ));
         } catch (err) {
             console.error("Failed to delete comment:", err);
             alert("Failed to delete comment. You can only delete your own comments.");
@@ -258,10 +246,10 @@ export default function HomeFeed() {
     const handleLikeComment = async (postId: string, commentId: string) => {
         try {
             const updatedComment = await likeComment(commentId);
-            setComments({
-                ...comments,
-                [postId]: (comments[postId] || []).map(c => c.id === commentId ? updatedComment : c)
-            });
+            setComments(prev => ({
+                ...prev,
+                [postId]: (prev[postId] || []).map(c => c.id === commentId ? updatedComment : c)
+            }));
         } catch (err) {
             console.error("Failed to like comment:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to like comment";
@@ -272,10 +260,10 @@ export default function HomeFeed() {
     const handleDislikeComment = async (postId: string, commentId: string) => {
         try {
             const updatedComment = await dislikeComment(commentId);
-            setComments({
-                ...comments,
-                [postId]: (comments[postId] || []).map(c => c.id === commentId ? updatedComment : c)
-            });
+            setComments(prev => ({
+                ...prev,
+                [postId]: (prev[postId] || []).map(c => c.id === commentId ? updatedComment : c)
+            }));
         } catch (err) {
             console.error("Failed to dislike comment:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to dislike comment";
@@ -355,6 +343,89 @@ export default function HomeFeed() {
             alert(errorMessage);
         }
     };
+
+    const handleLikeReply = async (commentId: string, replyId: string) => {
+        try {
+            console.log('[Like Reply] Liking reply:', replyId, 'in comment:', commentId);
+            const updatedReply = await likeCommentReply(replyId);
+            console.log('[Like Reply] Response:', updatedReply);
+            setReplies(prev => ({
+                ...prev,
+                [commentId]: (prev[commentId] || []).map(r => r.id === replyId ? updatedReply : r)
+            }));
+        } catch (err) {
+            console.error("Failed to like reply:", err);
+            const errorMessage = err instanceof Error ? err.message : "Failed to like reply";
+            alert(errorMessage);
+        }
+    };
+
+    const handleDislikeReply = async (commentId: string, replyId: string) => {
+        try {
+            console.log('[Dislike Reply] Disliking reply:', replyId, 'in comment:', commentId);
+            const updatedReply = await dislikeCommentReply(replyId);
+            console.log('[Dislike Reply] Response:', updatedReply);
+            setReplies(prev => ({
+                ...prev,
+                [commentId]: (prev[commentId] || []).map(r => r.id === replyId ? updatedReply : r)
+            }));
+        } catch (err) {
+            console.error("Failed to dislike reply:", err);
+            const errorMessage = err instanceof Error ? err.message : "Failed to dislike reply";
+            alert(errorMessage);
+        }
+    };
+
+    const handleReplyClick = (commentId: string, anonId: string) => {
+        const mention = `@${anonId.substring(0, 8)} `;
+        setReplyText({ ...replyText, [commentId]: mention });
+        // Focus the reply input
+        setTimeout(() => {
+            const input = document.getElementById(`reply-input-${commentId}`) as HTMLInputElement;
+            if (input) {
+                input.focus();
+                input.setSelectionRange(mention.length, mention.length);
+            }
+        }, 100);
+    };
+
+    // Function to render text with mentions highlighted
+    const renderTextWithMentions = (text: string) => {
+        // Match @userid pattern (8 characters after @)
+        const mentionRegex = /@(\w{8})/g;
+        const parts = [];
+        let lastIndex = 0;
+        let match;
+
+        while ((match = mentionRegex.exec(text)) !== null) {
+            // Add text before mention
+            if (match.index > lastIndex) {
+                parts.push(text.substring(lastIndex, match.index));
+            }
+            // Add mention with styling
+            parts.push(
+                <span 
+                    key={match.index} 
+                    className="text-blue-600 dark:text-blue-400 font-semibold cursor-pointer hover:underline"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        // Could add user profile view here
+                    }}
+                >
+                    {match[0]}
+                </span>
+            );
+            lastIndex = match.index + match[0].length;
+        }
+
+        // Add remaining text
+        if (lastIndex < text.length) {
+            parts.push(text.substring(lastIndex));
+        }
+
+        return parts.length > 0 ? parts : text;
+    };
+
 
     // Search handlers
     const handleSearch = async () => {
@@ -585,15 +656,15 @@ export default function HomeFeed() {
                                         }`}
                                     >
                                         <svg
-                                            className="w-5 h-5 rotate-180"
+                                            className="w-5 h-5"
                                             fill={post.user_reaction === "dislike" ? "currentColor" : "none"}
                                             stroke="currentColor"
                                             strokeWidth={post.user_reaction === "dislike" ? "0" : "2"}
                                             viewBox="0 0 24 24"
                                         >
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
                                         </svg>
-                                        <span className="font-mono">{post.dislikes}</span>
+                                        <span className="font-mono">{Math.max(0, post.dislikes)}</span>
                                     </button>
                                 </div>
                             </div>
@@ -708,15 +779,15 @@ export default function HomeFeed() {
                             }`}
                         >
                             <svg
-                                className="w-5 h-5 rotate-180"
+                                className="w-5 h-5"
                                 fill={post.user_reaction === "dislike" ? "currentColor" : "none"}
                                 stroke="currentColor"
                                 strokeWidth={post.user_reaction === "dislike" ? "0" : "2"}
                                 viewBox="0 0 24 24"
                             >
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
                             </svg>
-                            <span className="font-mono">{post.dislikes}</span>
+                            <span className="font-mono">{Math.max(0, post.dislikes)}</span>
                         </button>
                     </div>
 
@@ -727,7 +798,10 @@ export default function HomeFeed() {
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
                             </svg>
-                            <span>{comments[post.id]?.length || 0}</span>
+                            <span>{
+                                (comments[post.id]?.length || 0) + 
+                                (comments[post.id]?.reduce((sum, c) => sum + (c.replies_count || 0), 0) || 0)
+                            }</span>
                         </div>
 
                         {/* Delete Button - only show for own posts */}
@@ -787,7 +861,11 @@ export default function HomeFeed() {
                         {(comments[post.id] || []).length > 0 && (
                             <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-200 dark:border-green-300/10">
                                 <span className="text-xs font-mono text-slate-500 dark:text-green-300/60">
-                                    {comments[post.id].length} comment{comments[post.id].length !== 1 ? 's' : ''}
+                                    {(() => {
+                                        const totalCount = (comments[post.id]?.length || 0) + 
+                                            (comments[post.id]?.reduce((sum, c) => sum + (c.replies_count || 0), 0) || 0);
+                                        return `${totalCount} comment${totalCount !== 1 ? 's' : ''}`;
+                                    })()}
                                 </span>
                                 <div className="relative">
                                     <select
@@ -825,37 +903,68 @@ export default function HomeFeed() {
                                                     User #{comment.anon_id.substring(0, 8)} • {timeAgo(comment.created_at)}
                                                 </div>
                                                 <div className="text-sm text-slate-800 dark:text-green-300 break-words">
-                                                    {comment.text}
+                                                    {renderTextWithMentions(comment.text)}
                                                 </div>
-                                                <div className="mt-2 flex items-center gap-2 text-xs">
+                                                <div className="mt-2 flex items-center gap-4 text-sm">
                                                     <button
                                                         type="button"
-                                                        onClick={() => handleLikeComment(post.id, comment.id)}
-                                                        className={`flex items-center gap-1 px-2 py-1 rounded-md transition ${
+                                                        onClick={(event) => {
+                                                            event.preventDefault();
+                                                            event.stopPropagation();
+                                                            handleLikeComment(post.id, comment.id);
+                                                        }}
+                                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
                                                             comment.user_reaction === "like"
                                                                 ? "bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold"
                                                                 : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
                                                         }`}
                                                     >
-                                                        <span>👍</span>
+                                                        <svg
+                                                            className="w-5 h-5"
+                                                            fill={comment.user_reaction === "like" ? "currentColor" : "none"}
+                                                            stroke="currentColor"
+                                                            strokeWidth={comment.user_reaction === "like" ? "0" : "2"}
+                                                            viewBox="0 0 24 24"
+                                                        >
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                                                        </svg>
                                                         <span className="font-mono">{comment.likes}</span>
                                                     </button>
                                                     <button
                                                         type="button"
-                                                        onClick={() => handleDislikeComment(post.id, comment.id)}
-                                                        className={`flex items-center gap-1 px-2 py-1 rounded-md transition ${
+                                                        onClick={(event) => {
+                                                            event.preventDefault();
+                                                            event.stopPropagation();
+                                                            handleDislikeComment(post.id, comment.id);
+                                                        }}
+                                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
                                                             comment.user_reaction === "dislike"
                                                                 ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-semibold"
                                                                 : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
                                                         }`}
                                                     >
-                                                        <span>👎</span>
-                                                        <span className="font-mono">{comment.dislikes}</span>
+                                                        <svg
+                                                            className="w-5 h-5"
+                                                            fill={comment.user_reaction === "dislike" ? "currentColor" : "none"}
+                                                            stroke="currentColor"
+                                                            strokeWidth={comment.user_reaction === "dislike" ? "0" : "2"}
+                                                            viewBox="0 0 24 24"
+                                                        >
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
+                                                        </svg>
+                                                        <span className="font-mono">{Math.max(0, comment.dislikes)}</span>
                                                     </button>
                                                     <button
                                                         type="button"
-                                                        onClick={() => toggleReplies(comment.id)}
-                                                        className="ml-2 text-slate-500 dark:text-green-300/60 hover:text-slate-700 dark:hover:text-green-300 font-mono transition"
+                                                        onClick={() => {
+                                                            if (!showReplies[comment.id]) {
+                                                                toggleReplies(comment.id);
+                                                                handleReplyClick(comment.id, comment.anon_id);
+                                                            } else {
+                                                                toggleReplies(comment.id);
+                                                            }
+                                                        }}
+                                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700 font-mono transition"
                                                     >
                                                         {showReplies[comment.id] ? "Hide" : "Reply"}
                                                         {comment.replies_count > 0 ? ` (${comment.replies_count})` : ""}
@@ -866,6 +975,7 @@ export default function HomeFeed() {
                                                     <div className="mt-3 pl-3 border-l border-slate-200 dark:border-green-300/20">
                                                         <div className="flex gap-2 mb-2">
                                                             <input
+                                                                id={`reply-input-${comment.id}`}
                                                                 type="text"
                                                                 value={replyText[comment.id] || ""}
                                                                 onChange={(e) => setReplyText({ ...replyText, [comment.id]: e.target.value })}
@@ -890,28 +1000,85 @@ export default function HomeFeed() {
                                                         </div>
 
                                                         {loadingReplies[comment.id] ? (
-                                                            <div className="text-xs text-slate-400 dark:text-green-300/50 font-mono">Loading replies...</div>
+                                                            <div className="text-sm text-slate-400 dark:text-green-300/50 font-mono">Loading replies...</div>
                                                         ) : (
                                                             <div className="space-y-2">
                                                                 {(replies[comment.id] || []).map((reply) => (
                                                                     <div
                                                                         key={reply.id}
-                                                                        className="p-2 rounded-lg bg-white dark:bg-black border border-slate-200 dark:border-green-300/10"
+                                                                        className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-green-300/10"
                                                                     >
                                                                         <div className="flex items-start justify-between gap-2">
                                                                             <div className="flex-1">
-                                                                                <div className="text-[11px] font-mono text-slate-500 dark:text-green-300/60 mb-1">
+                                                                                <div className="text-xs font-mono text-slate-500 dark:text-green-300/60 mb-1">
                                                                                     User #{reply.anon_id.substring(0, 8)} • {timeAgo(reply.created_at)}
                                                                                 </div>
-                                                                                <div className="text-xs text-slate-800 dark:text-green-300 break-words">
-                                                                                    {reply.text}
+                                                                                <div className="text-sm text-slate-800 dark:text-green-300 break-words">
+                                                                                    {renderTextWithMentions(reply.text)}
+                                                                                </div>
+                                                                                <div className="mt-2 flex items-center gap-3 text-xs">
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={(event) => {
+                                                                                            event.preventDefault();
+                                                                                            event.stopPropagation();
+                                                                                            handleLikeReply(comment.id, reply.id);
+                                                                                        }}
+                                                                                        className={`flex items-center gap-1 px-2 py-1 rounded-lg transition ${
+                                                                                            reply.user_reaction === "like"
+                                                                                                ? "bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold"
+                                                                                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                                                                        }`}
+                                                                                    >
+                                                                                        <svg
+                                                                                            className="w-4 h-4"
+                                                                                            fill={reply.user_reaction === "like" ? "currentColor" : "none"}
+                                                                                            stroke="currentColor"
+                                                                                            strokeWidth={reply.user_reaction === "like" ? "0" : "2"}
+                                                                                            viewBox="0 0 24 24"
+                                                                                        >
+                                                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                                                                                        </svg>
+                                                                                        <span className="font-mono">{reply.likes}</span>
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={(event) => {
+                                                                                            event.preventDefault();
+                                                                                            event.stopPropagation();
+                                                                                            handleDislikeReply(comment.id, reply.id);
+                                                                                        }}
+                                                                                        className={`flex items-center gap-1 px-2 py-1 rounded-lg transition ${
+                                                                                            reply.user_reaction === "dislike"
+                                                                                                ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-semibold"
+                                                                                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                                                                        }`}
+                                                                                    >
+                                                                                        <svg
+                                                                                            className="w-4 h-4"
+                                                                                            fill={reply.user_reaction === "dislike" ? "currentColor" : "none"}
+                                                                                            stroke="currentColor"
+                                                                                            strokeWidth={reply.user_reaction === "dislike" ? "0" : "2"}
+                                                                                            viewBox="0 0 24 24"
+                                                                                        >
+                                                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
+                                                                                        </svg>
+                                                                                        <span className="font-mono">{Math.max(0, reply.dislikes)}</span>
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => handleReplyClick(comment.id, reply.anon_id)}
+                                                                                        className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700 font-mono transition"
+                                                                                    >
+                                                                                        Reply
+                                                                                    </button>
                                                                                 </div>
                                                                             </div>
                                                                             {myAnonId && reply.anon_id === myAnonId && (
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={() => handleDeleteReply(post.id, comment.id, reply.id)}
-                                                                                    className="text-slate-400 dark:text-green-300/50 hover:text-red-600 dark:hover:text-red-400 text-[11px] transition"
+                                                                                    className="text-slate-400 dark:text-green-300/50 hover:text-red-600 dark:hover:text-red-400 text-xs transition"
                                                                                 >
                                                                                     🗑️
                                                                                 </button>

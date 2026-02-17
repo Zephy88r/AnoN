@@ -332,13 +332,17 @@ func CommentReplyGet(cfg config.Config) http.HandlerFunc {
 		out := make([]types.CommentReplyDTO, len(replies))
 
 		for i, reply := range replies {
+			reaction, _ := store.DefaultStore().GetReplyReaction(reply.ID, claims.AnonID)
 			out[i] = types.CommentReplyDTO{
-				ID:        reply.ID,
-				CommentID: reply.CommentID,
-				AnonID:    reply.AnonID,
-				Text:      reply.Text,
-				CreatedAt: reply.CreatedAt.Format(time.RFC3339),
-				Deleted:   reply.Deleted,
+				ID:           reply.ID,
+				CommentID:    reply.CommentID,
+				AnonID:       reply.AnonID,
+				Text:         reply.Text,
+				CreatedAt:    reply.CreatedAt.Format(time.RFC3339),
+				Deleted:      reply.Deleted,
+				Likes:        reply.Likes,
+				Dislikes:     reply.Dislikes,
+				UserReaction: reaction,
 			}
 		}
 
@@ -374,5 +378,99 @@ func CommentReplyDelete(cfg config.Config) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+	}
+}
+
+func CommentReplyLike(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims := httpctx.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, "no claims", http.StatusUnauthorized)
+			return
+		}
+
+		var req types.CommentReplyReactionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+
+		if req.ReplyID == "" {
+			http.Error(w, "reply_id required", http.StatusBadRequest)
+			return
+		}
+
+		if err := store.DefaultStore().ReactToReply(req.ReplyID, claims.AnonID, "like"); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		reply, ok := store.DefaultStore().GetReply(req.ReplyID)
+		if !ok {
+			http.Error(w, "reply not found", http.StatusNotFound)
+			return
+		}
+
+		reaction, _ := store.DefaultStore().GetReplyReaction(reply.ID, claims.AnonID)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.CommentReplyDTO{
+			ID:           reply.ID,
+			CommentID:    reply.CommentID,
+			AnonID:       reply.AnonID,
+			Text:         reply.Text,
+			CreatedAt:    reply.CreatedAt.Format(time.RFC3339),
+			Deleted:      reply.Deleted,
+			Likes:        reply.Likes,
+			Dislikes:     reply.Dislikes,
+			UserReaction: reaction,
+		})
+	}
+}
+
+func CommentReplyDislike(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims := httpctx.ClaimsFromContext(r.Context())
+		if claims == nil {
+			http.Error(w, "no claims", http.StatusUnauthorized)
+			return
+		}
+
+		var req types.CommentReplyReactionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+
+		if req.ReplyID == "" {
+			http.Error(w, "reply_id required", http.StatusBadRequest)
+			return
+		}
+
+		if err := store.DefaultStore().ReactToReply(req.ReplyID, claims.AnonID, "dislike"); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		reply, ok := store.DefaultStore().GetReply(req.ReplyID)
+		if !ok {
+			http.Error(w, "reply not found", http.StatusNotFound)
+			return
+		}
+
+		reaction, _ := store.DefaultStore().GetReplyReaction(reply.ID, claims.AnonID)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.CommentReplyDTO{
+			ID:           reply.ID,
+			CommentID:    reply.CommentID,
+			AnonID:       reply.AnonID,
+			Text:         reply.Text,
+			CreatedAt:    reply.CreatedAt.Format(time.RFC3339),
+			Deleted:      reply.Deleted,
+			Likes:        reply.Likes,
+			Dislikes:     reply.Dislikes,
+			UserReaction: reaction,
+		})
 	}
 }

@@ -81,6 +81,8 @@ func NewRouter(cfg config.Config) http.Handler {
 		pr.With(SessionAuth(cfg)).Post("/comments/replies/create", handlers.CommentReplyCreate(cfg))
 		pr.With(SessionAuth(cfg)).Get("/comments/replies", handlers.CommentReplyGet(cfg))
 		pr.With(SessionAuth(cfg)).Post("/comments/replies/delete", handlers.CommentReplyDelete(cfg))
+		pr.With(SessionAuth(cfg)).Post("/comments/replies/like", handlers.CommentReplyLike(cfg))
+		pr.With(SessionAuth(cfg)).Post("/comments/replies/dislike", handlers.CommentReplyDislike(cfg))
 	})
 
 	// Admin routes (protected by admin session token)

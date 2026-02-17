@@ -107,6 +107,9 @@ export type ApiCommentReply = {
     text: string;
     created_at: string;
     deleted: boolean;
+    likes: number;
+    dislikes: number;
+    user_reaction?: string;
 };
 
 export type ApiCommentRepliesResponse = {
@@ -126,6 +129,20 @@ export async function getCommentReplies(commentId: string) {
 
 export async function deleteCommentReply(replyId: string) {
     return apiFetch<{ status: string }>("/posts/comments/replies/delete", {
+        method: "POST",
+        body: JSON.stringify({ reply_id: replyId }),
+    });
+}
+
+export async function likeCommentReply(replyId: string) {
+    return apiFetch<ApiCommentReply>("/posts/comments/replies/like", {
+        method: "POST",
+        body: JSON.stringify({ reply_id: replyId }),
+    });
+}
+
+export async function dislikeCommentReply(replyId: string) {
+    return apiFetch<ApiCommentReply>("/posts/comments/replies/dislike", {
         method: "POST",
         body: JSON.stringify({ reply_id: replyId }),
     });

@@ -36,8 +36,11 @@ type Store interface {
 	GetCommentReaction(commentID, anonID string) (string, bool)
 	AddCommentReply(reply *CommentReply) error
 	GetCommentReplies(commentID string) []*CommentReply
+	GetReply(replyID string) (*CommentReply, bool)
 	DeleteCommentReplyByUser(replyID, anonID string) error
 	GetCommentRepliesCount(commentID string) int
+	ReactToReply(replyID, anonID, reactionType string) error
+	GetReplyReaction(replyID, anonID string) (string, bool)
 
 	// Geo Pings
 	PutGeo(ping *GeoPing)

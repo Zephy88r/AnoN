@@ -1148,7 +1148,7 @@ func (s *PgStore) GetCommentReaction(commentID, anonID string) (string, bool) {
 
 // AddCommentReply adds a reply to a comment
 func (s *PgStore) AddCommentReply(reply *CommentReply) error {
-	query := `INSERT INTO comment_replies (id, comment_id, anon_id, text, created_at, deleted) VALUES ($1, $2, $3, $4, $5, $6)`
+	query := `INSERT INTO comment_replies (id, comment_id, anon_id, text, created_at, deleted, likes, dislikes) VALUES ($1, $2, $3, $4, $5, $6, 0, 0)`
 	_, err := s.db.Exec(query, reply.ID, reply.CommentID, reply.AnonID, reply.Text, reply.CreatedAt, reply.Deleted)
 	if err != nil {
 		return fmt.Errorf("add comment reply: %w", err)
@@ -1158,7 +1158,7 @@ func (s *PgStore) AddCommentReply(reply *CommentReply) error {
 
 // GetCommentReplies retrieves all non-deleted replies for a comment
 func (s *PgStore) GetCommentReplies(commentID string) []*CommentReply {
-	query := `SELECT id, comment_id, anon_id, text, created_at, deleted FROM comment_replies WHERE comment_id = $1 AND deleted = false ORDER BY created_at ASC`
+	query := `SELECT id, comment_id, anon_id, text, created_at, deleted, likes, dislikes FROM comment_replies WHERE comment_id = $1 AND deleted = false ORDER BY created_at ASC`
 	rows, err := s.db.Query(query, commentID)
 	if err != nil {
 		fmt.Printf("error querying comment replies: %v\n", err)
@@ -1169,7 +1169,7 @@ func (s *PgStore) GetCommentReplies(commentID string) []*CommentReply {
 	replies := make([]*CommentReply, 0)
 	for rows.Next() {
 		r := &CommentReply{}
-		if err := rows.Scan(&r.ID, &r.CommentID, &r.AnonID, &r.Text, &r.CreatedAt, &r.Deleted); err != nil {
+		if err := rows.Scan(&r.ID, &r.CommentID, &r.AnonID, &r.Text, &r.CreatedAt, &r.Deleted, &r.Likes, &r.Dislikes); err != nil {
 			fmt.Printf("error scanning comment reply: %v\n", err)
 			continue
 		}
@@ -1177,6 +1177,17 @@ func (s *PgStore) GetCommentReplies(commentID string) []*CommentReply {
 	}
 
 	return replies
+}
+
+// GetReply retrieves a single reply by ID
+func (s *PgStore) GetReply(replyID string) (*CommentReply, bool) {
+	query := `SELECT id, comment_id, anon_id, text, created_at, likes, dislikes, deleted FROM comment_replies WHERE id = $1`
+	r := &CommentReply{}
+	err := s.db.QueryRow(query, replyID).Scan(&r.ID, &r.CommentID, &r.AnonID, &r.Text, &r.CreatedAt, &r.Likes, &r.Dislikes, &r.Deleted)
+	if err != nil {
+		return nil, false
+	}
+	return r, true
 }
 
 // DeleteCommentReplyByUser soft-deletes a reply if user is the author
@@ -1209,6 +1220,100 @@ func (s *PgStore) GetCommentRepliesCount(commentID string) int {
 		return 0
 	}
 	return count
+}
+
+// ReactToReply adds or updates a user's reaction to a reply
+func (s *PgStore) ReactToReply(replyID, anonID, reactionType string) error {
+	// Start transaction
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Check if reply exists and isn't deleted
+	var deleted bool
+	err = tx.QueryRow(`SELECT deleted FROM comment_replies WHERE id = $1`, replyID).Scan(&deleted)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("reply not found")
+	}
+	if err != nil {
+		return fmt.Errorf("check reply: %w", err)
+	}
+	if deleted {
+		return fmt.Errorf("reply is deleted")
+	}
+
+	// Get existing reaction
+	var existingReaction sql.NullString
+	err = tx.QueryRow(`SELECT reaction FROM reply_reactions WHERE reply_id = $1 AND anon_id = $2`, replyID, anonID).Scan(&existingReaction)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("get existing reaction: %w", err)
+	}
+
+	// If same reaction, remove it (toggle off)
+	if existingReaction.Valid && existingReaction.String == reactionType {
+		_, err = tx.Exec(`DELETE FROM reply_reactions WHERE reply_id = $1 AND anon_id = $2`, replyID, anonID)
+		if err != nil {
+			return fmt.Errorf("remove reaction: %w", err)
+		}
+
+		// Decrement counter
+		if reactionType == "like" {
+			_, err = tx.Exec(`UPDATE comment_replies SET likes = likes - 1 WHERE id = $1`, replyID)
+		} else if reactionType == "dislike" {
+			_, err = tx.Exec(`UPDATE comment_replies SET dislikes = dislikes - 1 WHERE id = $1`, replyID)
+		}
+		if err != nil {
+			return fmt.Errorf("decrement counter: %w", err)
+		}
+
+		return tx.Commit()
+	}
+
+	// If different reaction exists, update counters
+	if existingReaction.Valid {
+		if existingReaction.String == "like" {
+			_, err = tx.Exec(`UPDATE comment_replies SET likes = likes - 1 WHERE id = $1`, replyID)
+		} else if existingReaction.String == "dislike" {
+			_, err = tx.Exec(`UPDATE comment_replies SET dislikes = dislikes - 1 WHERE id = $1`, replyID)
+		}
+		if err != nil {
+			return fmt.Errorf("decrement old counter: %w", err)
+		}
+	}
+
+	// Add/update reaction
+	_, err = tx.Exec(`
+		INSERT INTO reply_reactions (reply_id, anon_id, reaction, created_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (reply_id, anon_id) DO UPDATE SET reaction = $3, created_at = $4
+	`, replyID, anonID, reactionType, time.Now())
+	if err != nil {
+		return fmt.Errorf("insert reaction: %w", err)
+	}
+
+	// Increment new counter
+	if reactionType == "like" {
+		_, err = tx.Exec(`UPDATE comment_replies SET likes = likes + 1 WHERE id = $1`, replyID)
+	} else if reactionType == "dislike" {
+		_, err = tx.Exec(`UPDATE comment_replies SET dislikes = dislikes + 1 WHERE id = $1`, replyID)
+	}
+	if err != nil {
+		return fmt.Errorf("increment counter: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// GetReplyReaction retrieves a user's reaction to a reply
+func (s *PgStore) GetReplyReaction(replyID, anonID string) (string, bool) {
+	var reaction string
+	err := s.db.QueryRow(`SELECT reaction FROM reply_reactions WHERE reply_id = $1 AND anon_id = $2`, replyID, anonID).Scan(&reaction)
+	if err != nil {
+		return "", false
+	}
+	return reaction, true
 }
 
 // GetCommentsCount returns count of non-deleted comments for a post

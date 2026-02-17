@@ -59,12 +59,15 @@ type CommentReactionRequest struct {
 }
 
 type CommentReplyDTO struct {
-	ID        string `json:"id"`
-	CommentID string `json:"comment_id"`
-	AnonID    string `json:"anon_id"`
-	Text      string `json:"text"`
-	CreatedAt string `json:"created_at"`
-	Deleted   bool   `json:"deleted"`
+	ID           string `json:"id"`
+	CommentID    string `json:"comment_id"`
+	AnonID       string `json:"anon_id"`
+	Text         string `json:"text"`
+	CreatedAt    string `json:"created_at"`
+	Deleted      bool   `json:"deleted"`
+	Likes        int    `json:"likes"`
+	Dislikes     int    `json:"dislikes"`
+	UserReaction string `json:"user_reaction,omitempty"`
 }
 
 type CommentReplyCreateRequest struct {
@@ -73,6 +76,10 @@ type CommentReplyCreateRequest struct {
 }
 
 type CommentReplyDeleteRequest struct {
+	ReplyID string `json:"reply_id"`
+}
+
+type CommentReplyReactionRequest struct {
 	ReplyID string `json:"reply_id"`
 }
 

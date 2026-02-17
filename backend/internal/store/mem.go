@@ -85,6 +85,15 @@ type CommentReply struct {
 	Text      string
 	CreatedAt time.Time
 	Deleted   bool
+	Likes     int
+	Dislikes  int
+}
+
+type ReplyReaction struct {
+	ReplyID      string
+	AnonID       string
+	ReactionType string // "like" or "dislike"
+	CreatedAt    time.Time
 }
 
 type GeoPing struct {
@@ -107,6 +116,7 @@ type MemStore struct {
 	postComments   map[string][]*PostComment              // postID -> comments
 	commentReacts  map[string]map[string]*CommentReaction // commentID -> anonID -> reaction
 	commentReplies map[string][]*CommentReply             // commentID -> replies
+	replyReacts    map[string]map[string]*ReplyReaction   // replyID -> anonID -> reaction
 }
 
 func NewMemStore() *MemStore {
@@ -122,6 +132,7 @@ func NewMemStore() *MemStore {
 		postComments:   make(map[string][]*PostComment),
 		commentReacts:  make(map[string]map[string]*CommentReaction),
 		commentReplies: make(map[string][]*CommentReply),
+		replyReacts:    make(map[string]map[string]*ReplyReaction),
 	}
 }
 
@@ -1134,6 +1145,29 @@ func (s *MemStore) GetCommentReplies(commentID string) []*CommentReply {
 	return result
 }
 
+// GetReply retrieves a single reply by ID
+func (s *MemStore) GetReply(replyID string) (*CommentReply, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	fmt.Printf("[DEBUG] GetReply searching for id: %s\n", replyID)
+	fmt.Printf("[DEBUG] Total comment IDs with replies: %d\n", len(s.commentReplies))
+
+	for commentID, replies := range s.commentReplies {
+		fmt.Printf("[DEBUG] Checking commentID %s with %d replies\n", commentID, len(replies))
+		for _, r := range replies {
+			fmt.Printf("[DEBUG] Comparing reply id %s with search id %s\n", r.ID, replyID)
+			if r.ID == replyID {
+				fmt.Printf("[DEBUG] Found reply: %+v\n", r)
+				return r, true
+			}
+		}
+	}
+
+	fmt.Printf("[DEBUG] Reply not found in store\n")
+	return nil, false
+}
+
 // DeleteCommentReplyByUser soft-deletes a reply if user is the author
 func (s *MemStore) DeleteCommentReplyByUser(replyID, anonID string) error {
 	s.mu.Lock()
@@ -1172,6 +1206,89 @@ func (s *MemStore) GetCommentRepliesCount(commentID string) int {
 	}
 
 	return count
+}
+
+// ReactToReply adds or updates a user's reaction to a reply
+func (s *MemStore) ReactToReply(replyID, anonID, reactionType string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var reply *CommentReply
+	for _, replies := range s.commentReplies {
+		for _, r := range replies {
+			if r.ID == replyID {
+				reply = r
+				break
+			}
+		}
+		if reply != nil {
+			break
+		}
+	}
+
+	if reply == nil {
+		return fmt.Errorf("reply not found")
+	}
+
+	if reply.Deleted {
+		return fmt.Errorf("reply is deleted")
+	}
+
+	if s.replyReacts[replyID] == nil {
+		s.replyReacts[replyID] = make(map[string]*ReplyReaction)
+	}
+
+	existingReaction := s.replyReacts[replyID][anonID]
+
+	if existingReaction != nil && existingReaction.ReactionType == reactionType {
+		if reactionType == "like" {
+			reply.Likes--
+		} else if reactionType == "dislike" {
+			reply.Dislikes--
+		}
+		delete(s.replyReacts[replyID], anonID)
+		return nil
+	}
+
+	if existingReaction != nil {
+		if existingReaction.ReactionType == "like" {
+			reply.Likes--
+		} else if existingReaction.ReactionType == "dislike" {
+			reply.Dislikes--
+		}
+	}
+
+	if reactionType == "like" {
+		reply.Likes++
+	} else if reactionType == "dislike" {
+		reply.Dislikes++
+	}
+
+	s.replyReacts[replyID][anonID] = &ReplyReaction{
+		ReplyID:      replyID,
+		AnonID:       anonID,
+		ReactionType: reactionType,
+		CreatedAt:    time.Now(),
+	}
+
+	return nil
+}
+
+// GetReplyReaction retrieves a user's reaction to a reply
+func (s *MemStore) GetReplyReaction(replyID, anonID string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.replyReacts[replyID] == nil {
+		return "", false
+	}
+
+	reaction, ok := s.replyReacts[replyID][anonID]
+	if !ok {
+		return "", false
+	}
+
+	return reaction.ReactionType, true
 }
 
 // GetCommentsCount returns count of non-deleted comments for a post
