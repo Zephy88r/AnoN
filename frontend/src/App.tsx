@@ -18,8 +18,7 @@ import AdminLogin from "./pages/AdminLogin";
 
 import RequireTrust from "./components/RequireTrust";
 import { NotificationProvider } from "./contexts/NotificationContext";
-import { bootstrapSession } from "./services/session";
-import { getSessionToken } from "./services/api";
+import { initSession } from "./services/session";
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -29,10 +28,7 @@ export default function App() {
 
     (async () => {
       try {
-        // If token already exists → done
-        if (!getSessionToken()) {
-          await bootstrapSession();
-        }
+        await initSession();
       } catch (e) {
         console.error("Session bootstrap failed", e);
       } finally {

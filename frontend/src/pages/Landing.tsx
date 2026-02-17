@@ -1,8 +1,24 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import bg from "../assets/front-background.png";
+import { bootstrapSession } from "../services/session";
 
 export default function Landing() {
     const navigate = useNavigate();
+    const [loading, setLoading] = useState(false);
+
+    const handleEnter = async () => {
+        if (loading) return;
+        setLoading(true);
+        try {
+            await bootstrapSession();
+            navigate("/app/feed");
+        } catch (error) {
+            console.error("[Landing] Bootstrap failed:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     return (
         <div
@@ -27,10 +43,11 @@ export default function Landing() {
             </p>
 
             <button
-            onClick={() => navigate("/app/feed")}
-            className="mt-6 w-full rounded-xl border border-green-500/30 bg-green-500/10 hover:bg-green-500/20 px-4 py-3 font-mono text-green-200 transition"
+            onClick={handleEnter}
+            disabled={loading}
+            className="mt-6 w-full rounded-xl border border-green-500/30 bg-green-500/10 hover:bg-green-500/20 px-4 py-3 font-mono text-green-200 transition disabled:opacity-60"
             >
-            Enter Network →
+            {loading ? "Linking…" : "Enter Network →"}
             </button>
 
             <p className="mt-4 text-xs text-green-300/60 font-mono">

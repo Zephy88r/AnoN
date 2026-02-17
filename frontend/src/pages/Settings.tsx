@@ -1,11 +1,14 @@
+import { useNavigate } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { getAnonDeviceKey } from "../services/geo";
+import { logout } from "../services/session";
 
 const card =
     "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-4";
 
 export default function Settings() {
     const { theme } = useTheme();
+    const navigate = useNavigate();
 
     // stable anon id (shortened for display)
     const anonId = getAnonDeviceKey()
@@ -114,6 +117,18 @@ export default function Settings() {
 
             <div className="mt-1 text-xs text-slate-600 dark:text-green-300/70">
             Used to restore access on a new device (later).
+            </div>
+
+            <div className="mt-6">
+            <button
+                onClick={() => {
+                logout();
+                navigate("/");
+                }}
+                className="w-full rounded-xl border border-emerald-500/30 dark:border-green-500/30 bg-emerald-500/10 dark:bg-green-500/10 hover:bg-emerald-500/20 dark:hover:bg-green-500/20 px-4 py-2 text-sm font-mono text-emerald-700 dark:text-green-200 transition"
+            >
+                Logout
+            </button>
             </div>
         </div>
         </div>

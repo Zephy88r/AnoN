@@ -117,6 +117,8 @@ type MemStore struct {
 	commentReacts  map[string]map[string]*CommentReaction // commentID -> anonID -> reaction
 	commentReplies map[string][]*CommentReply             // commentID -> replies
 	replyReacts    map[string]map[string]*ReplyReaction   // replyID -> anonID -> reaction
+	devices        map[string]*Device                     // device_public_id -> device
+	deviceNonces   map[string]map[string]*DeviceNonce     // device_public_id -> nonce -> device nonce
 }
 
 func NewMemStore() *MemStore {
@@ -133,6 +135,8 @@ func NewMemStore() *MemStore {
 		commentReacts:  make(map[string]map[string]*CommentReaction),
 		commentReplies: make(map[string][]*CommentReply),
 		replyReacts:    make(map[string]map[string]*ReplyReaction),
+		devices:        make(map[string]*Device),
+		deviceNonces:   make(map[string]map[string]*DeviceNonce),
 	}
 }
 
@@ -458,6 +462,115 @@ func (s *MemStore) PutSession(session SessionInfo) error {
 	copy := session
 	s.sessions[session.Token] = &copy
 	return nil
+}
+
+func (s *MemStore) GetDevice(devicePublicID string) (*Device, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	device, ok := s.devices[devicePublicID]
+	if !ok {
+		return nil, fmt.Errorf("device not found")
+	}
+	copy := *device
+	return &copy, nil
+}
+
+func (s *MemStore) GetDeviceByAnonID(anonID string) (*Device, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, device := range s.devices {
+		if device.AnonID == anonID {
+			copy := *device
+			return &copy, nil
+		}
+	}
+	return nil, fmt.Errorf("device not found")
+}
+
+func (s *MemStore) CreateDevice(device *Device) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.devices[device.DevicePublicID]; exists {
+		return fmt.Errorf("device already exists")
+	}
+	for _, existing := range s.devices {
+		if existing.Username == device.Username {
+			return fmt.Errorf("username already exists")
+		}
+		if existing.AnonID == device.AnonID {
+			return fmt.Errorf("anon id already exists")
+		}
+	}
+
+	if device.CreatedAt.IsZero() {
+		device.CreatedAt = time.Now()
+	}
+	if device.UpdatedAt.IsZero() {
+		device.UpdatedAt = device.CreatedAt
+	}
+
+	copy := *device
+	s.devices[device.DevicePublicID] = &copy
+	return nil
+}
+
+func (s *MemStore) UpdateDeviceTimestamp(devicePublicID string, updatedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	device, ok := s.devices[devicePublicID]
+	if !ok {
+		return fmt.Errorf("device not found")
+	}
+	device.UpdatedAt = updatedAt
+	return nil
+}
+
+func (s *MemStore) CreateDeviceNonce(devicePublicID, nonce string, expiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.deviceNonces[devicePublicID]; !ok {
+		s.deviceNonces[devicePublicID] = make(map[string]*DeviceNonce)
+	}
+	if _, exists := s.deviceNonces[devicePublicID][nonce]; exists {
+		return fmt.Errorf("nonce already exists")
+	}
+
+	createdAt := time.Now()
+	s.deviceNonces[devicePublicID][nonce] = &DeviceNonce{
+		DevicePublicID: devicePublicID,
+		Nonce:          nonce,
+		ExpiresAt:      expiresAt,
+		CreatedAt:      createdAt,
+	}
+	return nil
+}
+
+func (s *MemStore) ConsumeDeviceNonce(devicePublicID, nonce string, now time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	byDevice, ok := s.deviceNonces[devicePublicID]
+	if !ok {
+		return false, nil
+	}
+	entry, ok := byDevice[nonce]
+	if !ok {
+		return false, nil
+	}
+	if entry.UsedAt != nil {
+		return false, nil
+	}
+	if entry.ExpiresAt.Before(now) {
+		return false, nil
+	}
+
+	entry.UsedAt = &now
+	return true, nil
 }
 
 func (s *MemStore) GetAllTrustRequests() []*TrustRequest {

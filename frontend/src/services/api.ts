@@ -1,7 +1,8 @@
 import { storage } from "./storage";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
-const TOKEN_KEY = "session_token"; // storage prefixes with ghost:
+const TOKEN_KEY = "ghost_token"; // storage prefixes with ghost:
+const LEGACY_TOKEN_KEY = "session_token";
 
 // Track if we're currently rebootstrapping to prevent infinite loops
 let isRebootstrapping = false;
@@ -31,11 +32,23 @@ function unwrapToken(raw: unknown): string | null {
 
 export function getSessionToken(): string | null {
     const raw = storage.getJSON<string | null>(TOKEN_KEY, null);
-    return unwrapToken(raw);
+    const token = unwrapToken(raw);
+    if (token) return token;
+
+    const legacyRaw = storage.getJSON<string | null>(LEGACY_TOKEN_KEY, null);
+    const legacyToken = unwrapToken(legacyRaw);
+    if (legacyToken) {
+        storage.setJSON(TOKEN_KEY, legacyToken);
+        storage.remove(LEGACY_TOKEN_KEY);
+    }
+    return legacyToken;
 }
 
-export function setSessionToken(token: string) {
-    // store the raw token string, not JSON string of JSON string
+export function setSessionToken(token: string | null) {
+    if (!token) {
+        storage.remove(TOKEN_KEY);
+        return;
+    }
     storage.setJSON(TOKEN_KEY, token);
 }
 
@@ -84,11 +97,13 @@ async function rebootstrapOnce(): Promise<void> {
 
     // ✅ Only attach auth if enabled (default true, can disable via config)
     const shouldAuth = config?.auth !== false;
+    let tokenAttached = false;
     if (shouldAuth) {
         const token = getSessionToken();
         if (token) {
             headers["Authorization"] = `Bearer ${token}`;
-            
+            tokenAttached = true;
+
             // 🔍 DEV-ONLY debug (do not log full token)
             if (import.meta.env.DEV) {
                 console.log(`[api] auth header attached: len=${token.length}, startsWith=${token.startsWith("eyJ")}`);
@@ -104,7 +119,7 @@ async function rebootstrapOnce(): Promise<void> {
     }
 
     // ✅ Handle 401: rebootstrap once and retry
-    if (res.status === 401 && shouldAuth && !config?._isRetry) {
+    if (res.status === 401 && shouldAuth && tokenAttached && !config?._isRetry) {
         console.log("[api] 401 unauthorized, attempting rebootstrap...");
         try {
             await rebootstrapOnce();

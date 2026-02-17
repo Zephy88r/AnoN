@@ -55,6 +55,14 @@ type Store interface {
 	LogAuditEvent(event AuditLog)
 	PutSession(session SessionInfo) error
 
+	// Device auth
+	GetDevice(devicePublicID string) (*Device, error)
+	GetDeviceByAnonID(anonID string) (*Device, error)
+	CreateDevice(device *Device) error
+	UpdateDeviceTimestamp(devicePublicID string, updatedAt time.Time) error
+	CreateDeviceNonce(devicePublicID, nonce string, expiresAt time.Time) error
+	ConsumeDeviceNonce(devicePublicID, nonce string, now time.Time) (bool, error)
+
 	// Session management
 	UpdateSessionActivity(token string) error
 	CleanupExpiredSessions() (int, error)

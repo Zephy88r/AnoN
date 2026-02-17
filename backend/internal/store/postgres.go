@@ -417,6 +417,116 @@ func (s *PgStore) PutSession(session SessionInfo) error {
 	return nil
 }
 
+func (s *PgStore) GetDevice(devicePublicID string) (*Device, error) {
+	query := `
+		SELECT device_public_id, device_secret_hash, anon_id, username, created_at, updated_at
+		FROM devices
+		WHERE device_public_id = $1
+	`
+	device := &Device{}
+	err := s.db.QueryRow(query, devicePublicID).Scan(
+		&device.DevicePublicID,
+		&device.DeviceSecretHash,
+		&device.AnonID,
+		&device.Username,
+		&device.CreatedAt,
+		&device.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get device: %w", err)
+	}
+	return device, nil
+}
+
+func (s *PgStore) GetDeviceByAnonID(anonID string) (*Device, error) {
+	query := `
+		SELECT device_public_id, device_secret_hash, anon_id, username, created_at, updated_at
+		FROM devices
+		WHERE anon_id = $1
+		LIMIT 1
+	`
+	device := &Device{}
+	err := s.db.QueryRow(query, anonID).Scan(
+		&device.DevicePublicID,
+		&device.DeviceSecretHash,
+		&device.AnonID,
+		&device.Username,
+		&device.CreatedAt,
+		&device.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get device by anon id: %w", err)
+	}
+	return device, nil
+}
+
+func (s *PgStore) CreateDevice(device *Device) error {
+	createdAt := device.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	updatedAt := device.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = createdAt
+	}
+
+	query := `
+		INSERT INTO devices (device_public_id, device_secret_hash, anon_id, username, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	_, err := s.db.Exec(
+		query,
+		device.DevicePublicID,
+		device.DeviceSecretHash,
+		device.AnonID,
+		device.Username,
+		createdAt,
+		updatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("create device: %w", err)
+	}
+	return nil
+}
+
+func (s *PgStore) UpdateDeviceTimestamp(devicePublicID string, updatedAt time.Time) error {
+	query := `UPDATE devices SET updated_at = $1 WHERE device_public_id = $2`
+	_, err := s.db.Exec(query, updatedAt, devicePublicID)
+	if err != nil {
+		return fmt.Errorf("update device timestamp: %w", err)
+	}
+	return nil
+}
+
+func (s *PgStore) CreateDeviceNonce(devicePublicID, nonce string, expiresAt time.Time) error {
+	query := `
+		INSERT INTO device_nonces (device_public_id, nonce, expires_at, created_at)
+		VALUES ($1, $2, $3, $4)
+	`
+	_, err := s.db.Exec(query, devicePublicID, nonce, expiresAt, time.Now())
+	if err != nil {
+		return fmt.Errorf("create device nonce: %w", err)
+	}
+	return nil
+}
+
+func (s *PgStore) ConsumeDeviceNonce(devicePublicID, nonce string, now time.Time) (bool, error) {
+	query := `
+		UPDATE device_nonces
+		SET used_at = $1
+		WHERE device_public_id = $2 AND nonce = $3 AND used_at IS NULL AND expires_at >= $1
+	`
+	result, err := s.db.Exec(query, now, devicePublicID, nonce)
+	if err != nil {
+		return false, fmt.Errorf("consume device nonce: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("consume device nonce rows: %w", err)
+	}
+	return count > 0, nil
+}
+
 func newUUID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {

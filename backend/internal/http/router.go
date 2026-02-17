@@ -45,6 +45,9 @@ func NewRouter(cfg config.Config) http.Handler {
 		sr.With(SessionAuth(cfg)).Post("/refresh", handlers.SessionRefresh(cfg))
 	})
 
+	// -------- DEVICE AUTH --------
+	r.Post("/device/challenge", handlers.DeviceChallenge(cfg))
+
 	// -------- LINK CARDS --------
 	r.Route("/link-cards", func(lc chi.Router) {
 		lc.With(SessionAuth(cfg)).Post("/create", handlers.LinkCardCreate(cfg))

@@ -7,6 +7,7 @@ import {
     ComputerDesktopIcon,
     } from "@heroicons/react/24/outline";
 import NotificationBell from "./NotificationBell";
+import { getMyUsername } from "../services/session";
 
 interface NavbarProps {
   onNotificationToggle: () => void;
@@ -16,6 +17,7 @@ export default function Navbar({ onNotificationToggle }: NavbarProps) {
     const { themeMode, setThemeMode } = useTheme();
     const focusRing = "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-green-400 dark:focus-visible:ring-offset-black";
     const navigate = useNavigate();
+    const username = getMyUsername() ?? "ghost";
 
 
 
@@ -49,7 +51,7 @@ export default function Navbar({ onNotificationToggle }: NavbarProps) {
             <NotificationBell onToggle={onNotificationToggle} />
 
             <span className="font-mono text-sm text-slate-700 dark:text-green-300">
-                User #XXXXXX
+                {username}
             </span>
 
             {/* Theme selector */}
