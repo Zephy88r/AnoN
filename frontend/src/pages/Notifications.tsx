@@ -1,5 +1,6 @@
 import { useNotifications } from "../contexts/NotificationContext";
 import { CheckCircleIcon } from "@heroicons/react/24/outline";
+import { useNavigate } from "react-router-dom";
 
 function formatTimeAgo(createdAt: string): string {
   const now = new Date();
@@ -19,6 +20,28 @@ function formatTimeAgo(createdAt: string): string {
 export default function NotificationsPage() {
   const { notifications, markAsRead, markAllAsRead, hasUnread } =
     useNotifications();
+  const navigate = useNavigate();
+
+  const handleNotificationClick = (notification: {
+    id: string;
+    type?: "message" | "trust" | "post" | "system";
+  }) => {
+    markAsRead(notification.id);
+
+    switch (notification.type) {
+      case "message":
+        navigate("/app/messages");
+        break;
+      case "trust":
+        navigate("/app/trust");
+        break;
+      case "post":
+        navigate("/app/feed");
+        break;
+      default:
+        navigate("/app/feed");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-white dark:bg-black">
@@ -69,7 +92,7 @@ export default function NotificationsPage() {
             {notifications.map((notification) => (
               <div
                 key={notification.id}
-                onClick={() => markAsRead(notification.id)}
+                onClick={() => handleNotificationClick(notification)}
                 className={`p-4 rounded-lg border transition-all cursor-pointer ${
                   notification.isRead
                     ? "border-slate-200 dark:border-green-500/20 bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-green-500/5"
