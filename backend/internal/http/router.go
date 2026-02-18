@@ -74,6 +74,7 @@ func NewRouter(cfg config.Config) http.Handler {
 		pr.With(SessionAuth(cfg)).Post("/delete", handlers.PostDelete(cfg))
 		pr.With(SessionAuth(cfg)).Post("/like", handlers.PostLike(cfg))
 		pr.With(SessionAuth(cfg)).Post("/dislike", handlers.PostDislike(cfg))
+		pr.With(SessionAuth(cfg)).Post("/{id}/report", handlers.PostReport(cfg))
 
 		// Comments
 		pr.With(SessionAuth(cfg)).Post("/comments/create", handlers.CommentCreate(cfg))
@@ -93,6 +94,7 @@ func NewRouter(cfg config.Config) http.Handler {
 	r.Route("/admin", func(ar chi.Router) {
 		ar.Use(AdminAuth(cfg))
 		ar.Get("/posts", handlers.AdminGetPosts(cfg))
+		ar.Get("/posts/{id}", handlers.AdminGetPostDetail(cfg))
 		ar.Post("/posts/delete", handlers.AdminDeletePost(cfg))
 		ar.Get("/users", handlers.AdminGetUsers(cfg))
 		ar.Get("/stats", handlers.AdminGetStats(cfg))

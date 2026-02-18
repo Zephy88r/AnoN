@@ -77,6 +77,9 @@ func main() {
 		log.Println("⚠ Using in-memory store (set DATABASE_URL for PostgreSQL)")
 	}
 
+	// Seed test data for development
+	store.SeedTestData()
+
 	// Start session cleanup job
 	go startSessionCleanupJob()
 

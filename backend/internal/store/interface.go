@@ -74,11 +74,26 @@ type Store interface {
 	RevokeSession(token string) error
 	RevokeAllSessionsForUser(anonID string) (int, error)
 	EnforceSessionLimit(anonID string, maxSessions int) error
+
+	// User tracking and activity
+	EnsureUser(anonID string, now time.Time) error
+	MarkUserActive(anonID string, now time.Time) error
+	MarkUserInactive(anonID string) error
+	UpdateUserLastSeen(anonID string, now time.Time) error
+	GetActiveUsersCount() (int, error)
+	ReconcileUserActiveStatus(anonID string) error
+	GetTotalUsersCount() (int, error)
+
+	// Post Reports
+	ReportPost(postID, reportedAnonID, reporterAnonID, reason string, now time.Time) error
+	GetPostReportCount(postID string) int
+	GetTopReportedPostByAnon(anonID string, threshold int) *PostReport
 }
 
 // Admin types
 type UserInfo struct {
 	AnonID    string
+	Username  string
 	CreatedAt time.Time
 	PostCount int
 }
@@ -94,11 +109,18 @@ type SessionInfo struct {
 }
 
 type AuditLog struct {
-	ID        string
-	Action    string
-	AnonID    string
-	Details   string
-	Timestamp time.Time
+	ID        string    `json:"id"`
+	Action    string    `json:"action"`
+	AnonID    string    `json:"anon_id"`
+	Details   string    `json:"details"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// PostReport represents a report on a post
+type PostReport struct {
+	PostID         string
+	ReportCount    int
+	LastReportedAt time.Time
 }
 
 // PostSearchResult represents a post with search relevance information

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ type AdminPostDTO struct {
 
 type AdminUserDTO struct {
 	AnonID    string `json:"anon_id"`
+	Username  string `json:"username"`
 	CreatedAt string `json:"created_at"`
 	PostCount int    `json:"post_count"`
 }
@@ -30,6 +32,7 @@ type AdminUserDTO struct {
 type AdminStatsResponse struct {
 	TotalPosts     int     `json:"total_posts"`
 	TotalUsers     int     `json:"total_users"`
+	ActiveUsers    int     `json:"active_users"`
 	TotalSessions  int     `json:"total_sessions"`
 	AvgPostsPerDay float64 `json:"avg_posts_per_day"`
 	TopPosters     []struct {
@@ -45,10 +48,17 @@ type HealthStatus struct {
 }
 
 type AbuseReport struct {
-	AnonID     string `json:"anon_id"`
-	PostCount  int    `json:"post_count"`
-	LastPostAt string `json:"last_post_at"`
-	RateStatus string `json:"rate_status"` // "normal", "warning", "blocked"
+	AnonID       string      `json:"anon_id"`
+	PostCount    int         `json:"post_count"`
+	LastPostAt   string      `json:"last_post_at"`
+	RateStatus   string      `json:"rate_status"` // "normal", "warning", "blocked"
+	ReportedPost *ReportInfo `json:"reported_post,omitempty"`
+}
+
+type ReportInfo struct {
+	PostID         string `json:"post_id"`
+	ReportCount    int    `json:"report_count"`
+	LastReportedAt string `json:"last_reported_at"`
 }
 
 type AdminLoginRequest struct {
@@ -122,6 +132,7 @@ func AdminGetUsers(cfg config.Config) http.HandlerFunc {
 		for i, u := range users {
 			out[i] = AdminUserDTO{
 				AnonID:    u.AnonID,
+				Username:  u.Username,
 				CreatedAt: u.CreatedAt.Format(time.RFC3339),
 				PostCount: u.PostCount,
 			}
@@ -173,11 +184,26 @@ func AdminDeletePost(cfg config.Config) http.HandlerFunc {
 func AdminGetStats(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		posts := store.DefaultStore().GetFeed(10000)
-		users := store.DefaultStore().GetAllUsers()
+
+		// Get counts from store
+		totalUsers, err := store.DefaultStore().GetTotalUsersCount()
+		if err != nil {
+			log.Printf("WARNING: GetTotalUsersCount failed: %v", err)
+			totalUsers = 0
+		}
+
+		activeUsers, err := store.DefaultStore().GetActiveUsersCount()
+		if err != nil {
+			log.Printf("WARNING: GetActiveUsersCount failed: %v", err)
+			activeUsers = 0
+		}
+
+		log.Printf("Admin stats: total_users=%d, active_users=%d, total_posts=%d", totalUsers, activeUsers, len(posts))
 
 		stats := AdminStatsResponse{
 			TotalPosts:    len(posts),
-			TotalUsers:    len(users),
+			TotalUsers:    totalUsers,
+			ActiveUsers:   activeUsers,
 			TotalSessions: len(store.DefaultStore().GetAllSessions()),
 		}
 
@@ -332,11 +358,23 @@ func AdminGetAbuseDashboard(cfg config.Config) http.HandlerFunc {
 				rateStatus = "blocked"
 			}
 
+			// Get top reported post for this user if it meets threshold
+			var reportedPost *ReportInfo
+			topReport := store.DefaultStore().GetTopReportedPostByAnon(u.AnonID, REPORT_THRESHOLD)
+			if topReport != nil {
+				reportedPost = &ReportInfo{
+					PostID:         topReport.PostID,
+					ReportCount:    topReport.ReportCount,
+					LastReportedAt: topReport.LastReportedAt.Format(time.RFC3339),
+				}
+			}
+
 			reports = append(reports, AbuseReport{
-				AnonID:     u.AnonID,
-				PostCount:  stats.PostCount,
-				LastPostAt: stats.LastPostAt.Format(time.RFC3339),
-				RateStatus: rateStatus,
+				AnonID:       u.AnonID,
+				PostCount:    stats.PostCount,
+				LastPostAt:   stats.LastPostAt.Format(time.RFC3339),
+				RateStatus:   rateStatus,
+				ReportedPost: reportedPost,
 			})
 		}
 

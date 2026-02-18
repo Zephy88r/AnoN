@@ -15,6 +15,7 @@ import Panel from "../components/admin/Panel";
 import DataTable from "../components/admin/DataTable";
 import SystemHealthPanel from "../components/admin/SystemHealthPanel";
 import ConfirmationModal from "../components/ConfirmationModal";
+import PostDetailModal from "../components/PostDetailModal";
 import { formatAdminTime } from "../utils/formatTime";
 import {
     clearAdminToken,
@@ -85,6 +86,11 @@ export default function Admin() {
     const [selectedAuditLogs, setSelectedAuditLogs] = useState<Set<string>>(new Set());
     const [deleteAuditModalOpen, setDeleteAuditModalOpen] = useState(false);
     const [clearAuditModalOpen, setClearAuditModalOpen] = useState(false);
+
+    // Post detail modal state
+    const [postDetailModalOpen, setPostDetailModalOpen] = useState(false);
+    const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+    const [selectedPostReportCount, setSelectedPostReportCount] = useState(0);
 
     const trustSummary = useMemo(() => {
         const summary = { pending: 0, accepted: 0, declined: 0 };
@@ -398,11 +404,28 @@ export default function Admin() {
                     value={trustSummary.pending}
                     icon={ShieldCheckIcon}
                 />
-                <StatCard
-                    title="Total Users"
-                    value={stats?.total_users ?? 0}
-                    icon={ChatBubbleLeftRightIcon}
-                />
+                {/* Dual metric card for Total Users | Active Users */}
+                <div className="rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-5">
+                    <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                            <p className="text-xs font-mono tracking-wider uppercase text-slate-600 dark:text-green-300/70 mb-2">
+                                Total Users | Active Users
+                            </p>
+                            <div className="flex items-baseline gap-2">
+                                <p className="text-3xl font-semibold text-slate-950 dark:text-green-100">
+                                    {stats?.total_users ?? 0}
+                                </p>
+                                <span className="text-xl text-slate-400 dark:text-green-500/50 font-light">|</span>
+                                <p className="text-3xl font-semibold text-emerald-600 dark:text-green-400">
+                                    {stats?.active_users ?? 0}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 dark:bg-green-500/10 flex items-center justify-center border border-emerald-500/20 dark:border-green-500/20">
+                            <ChatBubbleLeftRightIcon className="w-5 h-5 text-emerald-700 dark:text-green-400" />
+                        </div>
+                    </div>
+                </div>
                 <StatCard
                     title="Feed Posts"
                     value={stats?.total_posts ?? 0}
@@ -910,6 +933,29 @@ export default function Admin() {
                                 <span className="font-mono">{r.rate_status}</span>
                             ),
                         },
+                        {
+                            key: "reported_post",
+                            label: "Reported Post",
+                            render: (r: AbuseReport) => {
+                                if (!r.reported_post) {
+                                    return <span className="text-slate-400 dark:text-green-300/50">—</span>;
+                                }
+                                return (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedPostId(r.reported_post!.post_id);
+                                            setSelectedPostReportCount(r.reported_post!.report_count);
+                                            setPostDetailModalOpen(true);
+                                        }}
+                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-500/15 dark:bg-orange-500/10 border border-orange-500/30 dark:border-orange-500/20 text-orange-700 dark:text-orange-300 hover:bg-orange-500/25 dark:hover:bg-orange-500/15 transition font-mono text-xs cursor-pointer"
+                                    >
+                                        <span>🚩</span>
+                                        <span>{r.reported_post.report_count}</span>
+                                    </button>
+                                );
+                            },
+                        },
                     ]}
                     data={filteredAbuse}
                     keyExtractor={(r) => r.anon_id}
@@ -930,9 +976,6 @@ export default function Admin() {
                 log.details.toLowerCase().includes(searchTerm)
             );
         });
-
-        console.log('Filtered logs:', filteredAuditLogs.map(log => ({ id: log.id, action: log.action })));
-        console.log('Selected logs:', Array.from(selectedAuditLogs));
 
         const allSelected = filteredAuditLogs.length > 0 && filteredAuditLogs.every((log) => selectedAuditLogs.has(log.id));
 
@@ -1056,7 +1099,6 @@ export default function Admin() {
                                         checked={selectedAuditLogs.has(log.id)}
                                         onChange={(e) => {
                                             e.stopPropagation();
-                                            console.log('Toggle log:', log.id, 'Current selected:', Array.from(selectedAuditLogs));
                                             handleSelectAuditLog(log.id);
                                         }}
                                         onMouseDown={(e) => e.stopPropagation()}
@@ -1112,6 +1154,7 @@ export default function Admin() {
             const searchTerm = usersFilter.toLowerCase();
             return (
                 user.anon_id.toLowerCase().includes(searchTerm) ||
+                user.username.toLowerCase().includes(searchTerm) ||
                 user.post_count.toString().includes(searchTerm)
             );
         });
@@ -1131,7 +1174,7 @@ export default function Admin() {
                     <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 dark:text-green-400/70" />
                     <input
                         type="text"
-                        placeholder="Search by Anon ID or post count..."
+                        placeholder="Search by Anon ID, username, or post count..."
                         value={usersFilter}
                         onChange={(e) => setUsersFilter(e.target.value)}
                         className="w-full pl-10 pr-10 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20
@@ -1164,9 +1207,11 @@ export default function Admin() {
                     columns={[
                         {
                             key: "anon_id",
-                            label: "Anon ID",
+                            label: "Anon ID | Username",
                             render: (u: AdminUser) => (
-                                <span className="font-mono">{u.anon_id.slice(0, 8)}</span>
+                                <span className="font-mono">
+                                    {u.anon_id.slice(0, 8)} | {u.username}
+                                </span>
                             ),
                         },
                         {
@@ -1299,6 +1344,18 @@ export default function Admin() {
                 confirmText="Clear All Logs"
                 cancelText="Cancel"
                 danger={true}
+            />
+
+            {/* Post Detail Modal */}
+            <PostDetailModal
+                open={postDetailModalOpen}
+                postId={selectedPostId}
+                reportCount={selectedPostReportCount}
+                onClose={() => {
+                    setPostDetailModalOpen(false);
+                    setSelectedPostId(null);
+                    setSelectedPostReportCount(0);
+                }}
             />
         </AdminLayout>
     );

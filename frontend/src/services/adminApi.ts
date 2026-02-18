@@ -12,6 +12,7 @@ export type AdminPost = {
 
 export type AdminUser = {
     anon_id: string;
+    username: string;
     created_at: string;
     post_count: number;
 };
@@ -19,6 +20,7 @@ export type AdminUser = {
 export type AdminStats = {
     total_posts: number;
     total_users: number;
+    active_users: number;
     total_sessions: number;
     avg_posts_per_day: number;
     top_posters: { anon_id: string; post_count: number }[];
@@ -43,6 +45,20 @@ export type AbuseReport = {
     post_count: number;
     last_post_at: string;
     rate_status: string;
+    reported_post?: {
+        post_id: string;
+        report_count: number;
+        last_reported_at: string;
+    } | null;
+};
+
+export type AdminPostDetail = {
+    id: string;
+    anon_id: string;
+    text: string;
+    created_at: string;
+    likes: number;
+    dislikes: number;
 };
 
 export type AuditLog = {
@@ -157,4 +173,8 @@ export async function clearAuditLogs() {
         method: "POST",
         body: JSON.stringify({}),
     });
+}
+
+export async function fetchAdminPostDetail(postId: string) {
+    return adminFetch<{ post: AdminPostDetail; report_count: number }>(`/posts/${postId}`);
 }

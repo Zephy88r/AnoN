@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import TrustRequestModal from "../components/TrustRequestModal";
 import { useTrust } from "../contexts/TrustContext";
 import { ensureThreadForPeer } from "../services/thread";
-import { createPost, fetchFeed, deletePost, likePost, dislikePost, getRemainingPosts, createComment, getComments, deleteComment, likeComment, dislikeComment, createCommentReply, getCommentReplies, deleteCommentReply, likeCommentReply, dislikeCommentReply, searchPosts } from "../services/postsApi";
+import { createPost, fetchFeed, deletePost, likePost, dislikePost, getRemainingPosts, createComment, getComments, deleteComment, likeComment, dislikeComment, createCommentReply, getCommentReplies, deleteCommentReply, likeCommentReply, dislikeCommentReply, searchPosts, reportPost } from "../services/postsApi";
 import type { ApiPost, ApiComment, ApiCommentReply, ApiSearchResult } from "../services/postsApi";
 import { getMyAnonId } from "../services/session";
 
@@ -163,6 +163,16 @@ export default function HomeFeed() {
         } catch (err) {
             console.error("Failed to delete post:", err);
             alert("Failed to delete post. You can only delete your own posts.");
+        }
+    };
+
+    const handleReportPost = async (postId: string) => {
+        try {
+            await reportPost(postId);
+            alert("Post reported successfully");
+        } catch (err) {
+            console.error("Failed to report post:", err);
+            alert("Failed to report post. Please try again.");
         }
     };
 
@@ -817,6 +827,18 @@ export default function HomeFeed() {
                                 className="text-slate-400 dark:text-green-300/50 hover:text-red-600 dark:hover:text-red-400 transition"
                             >
                                 🗑️
+                            </button>
+                        )}
+
+                        {/* Report Button - show for all other users */}
+                        {myAnonId && post.anon_id !== myAnonId && (
+                            <button
+                                type="button"
+                                onClick={() => handleReportPost(post.id)}
+                                className="text-slate-400 dark:text-green-300/50 hover:text-orange-600 dark:hover:text-orange-400 transition"
+                                title="Report this post"
+                            >
+                                🚩
                             </button>
                         )}
                     </div>

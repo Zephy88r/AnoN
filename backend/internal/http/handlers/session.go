@@ -183,6 +183,15 @@ func SessionBootstrap(cfg config.Config) http.HandlerFunc {
 			writeJSONError(w, http.StatusInternalServerError, "failed to sign token")
 			return
 		}
+
+		// Ensure user exists and mark as active
+		if err := store.DefaultStore().EnsureUser(device.AnonID, now); err != nil {
+			log.Printf("WARNING: ensure user failed for %s: %v", device.AnonID, err)
+			// Continue anyway to maintain backward compatibility
+		} else {
+			log.Printf("User ensured: %s (active)", device.AnonID)
+		}
+
 		err = store.DefaultStore().PutSession(store.SessionInfo{
 			ID:             "",
 			AnonID:         device.AnonID,
@@ -269,6 +278,15 @@ func SessionRefresh(cfg config.Config) http.HandlerFunc {
 		}
 
 		now := time.Now()
+
+		// Ensure user exists and mark as active
+		if err := store.DefaultStore().EnsureUser(anonID, now); err != nil {
+			log.Printf("WARNING: ensure user failed for %s: %v", anonID, err)
+			// Continue anyway to maintain backward compatibility
+		} else {
+			log.Printf("User ensured: %s (active) - refresh", anonID)
+		}
+
 		err = store.DefaultStore().PutSession(store.SessionInfo{
 			ID:             "",
 			AnonID:         anonID,

@@ -176,3 +176,10 @@ export async function searchPosts(query: string, limit: number = 20, offset: num
     });
     return apiFetch<ApiSearchResponse>(`/posts/search?${params}`);
 }
+
+export async function reportPost(postId: string, reason?: string) {
+    return apiFetch<{ ok: boolean }>(`/posts/${postId}/report`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason || "" }),
+    });
+}

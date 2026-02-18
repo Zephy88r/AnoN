@@ -119,6 +119,17 @@ type MemStore struct {
 	replyReacts    map[string]map[string]*ReplyReaction   // replyID -> anonID -> reaction
 	devices        map[string]*Device                     // device_public_id -> device
 	deviceNonces   map[string]map[string]*DeviceNonce     // device_public_id -> nonce -> device nonce
+	users          map[string]*User                       // anon_id -> user
+	postReports    map[string]map[string]bool             // postID -> reporterAnonID -> true
+}
+
+type User struct {
+	ID          string
+	AnonID      string
+	IsActive    bool
+	LastSeenAt  *time.Time
+	LastLoginAt *time.Time
+	CreatedAt   time.Time
 }
 
 func NewMemStore() *MemStore {
@@ -137,6 +148,8 @@ func NewMemStore() *MemStore {
 		replyReacts:    make(map[string]map[string]*ReplyReaction),
 		devices:        make(map[string]*Device),
 		deviceNonces:   make(map[string]map[string]*DeviceNonce),
+		users:          make(map[string]*User),
+		postReports:    make(map[string]map[string]bool),
 	}
 }
 
@@ -429,17 +442,22 @@ func (s *MemStore) GetAllUsers() []*UserInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	userMap := make(map[string]*UserInfo)
-	for _, p := range s.posts {
-		if _, ok := userMap[p.AnonID]; !ok {
-			userMap[p.AnonID] = &UserInfo{AnonID: p.AnonID, CreatedAt: p.CreatedAt}
+	users := make([]*UserInfo, 0, len(s.devices))
+	for _, device := range s.devices {
+		// Count posts for this user
+		postCount := 0
+		for _, p := range s.posts {
+			if p.AnonID == device.AnonID {
+				postCount++
+			}
 		}
-		userMap[p.AnonID].PostCount++
-	}
 
-	users := make([]*UserInfo, 0, len(userMap))
-	for _, u := range userMap {
-		users = append(users, u)
+		users = append(users, &UserInfo{
+			AnonID:    device.AnonID,
+			Username:  device.Username,
+			CreatedAt: device.CreatedAt,
+			PostCount: postCount,
+		})
 	}
 	return users
 }
@@ -604,11 +622,29 @@ func (s *MemStore) CleanupExpiredSessions() (int, error) {
 
 	now := time.Now()
 	count := 0
+	affectedUsers := make(map[string]bool)
 
 	for token, sess := range s.sessions {
 		if sess.ExpiresAt.Before(now) {
+			affectedUsers[sess.AnonID] = true
 			delete(s.sessions, token)
 			count++
+		}
+	}
+
+	// Reconcile active status for all affected users
+	for anonID := range affectedUsers {
+		// Check if user has any remaining active sessions
+		hasActiveSession := false
+		for _, sess := range s.sessions {
+			if sess.AnonID == anonID && sess.ExpiresAt.After(now) {
+				hasActiveSession = true
+				break
+			}
+		}
+
+		if user, exists := s.users[anonID]; exists {
+			user.IsActive = hasActiveSession
 		}
 	}
 
@@ -648,11 +684,19 @@ func (s *MemStore) RevokeSession(token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.sessions[token]; !ok {
+	sess, ok := s.sessions[token]
+	if !ok {
 		return fmt.Errorf("session not found")
 	}
 
+	anonID := sess.AnonID
 	delete(s.sessions, token)
+
+	// Unlock before calling ReconcileUserActiveStatus to avoid deadlock
+	s.mu.Unlock()
+	_ = s.ReconcileUserActiveStatus(anonID)
+	s.mu.Lock()
+
 	return nil
 }
 
@@ -666,6 +710,11 @@ func (s *MemStore) RevokeAllSessionsForUser(anonID string) (int, error) {
 			delete(s.sessions, token)
 			count++
 		}
+	}
+
+	// Mark user inactive since all sessions are revoked
+	if user, exists := s.users[anonID]; exists {
+		user.IsActive = false
 	}
 
 	return count, nil
@@ -719,6 +768,175 @@ func (s *MemStore) EnforceSessionLimit(anonID string, maxSessions int) error {
 
 	return nil
 }
+
+// ===== USER TRACKING =====
+
+func (s *MemStore) EnsureUser(anonID string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if user, exists := s.users[anonID]; exists {
+		user.IsActive = true
+		user.LastLoginAt = &now
+		user.LastSeenAt = &now
+	} else {
+		s.users[anonID] = &User{
+			AnonID:      anonID,
+			IsActive:    true,
+			LastLoginAt: &now,
+			LastSeenAt:  &now,
+			CreatedAt:   now,
+		}
+	}
+	return nil
+}
+
+func (s *MemStore) MarkUserActive(anonID string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if user, exists := s.users[anonID]; exists {
+		user.IsActive = true
+		user.LastSeenAt = &now
+	}
+	return nil
+}
+
+func (s *MemStore) MarkUserInactive(anonID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if user, exists := s.users[anonID]; exists {
+		user.IsActive = false
+	}
+	return nil
+}
+
+func (s *MemStore) UpdateUserLastSeen(anonID string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if user, exists := s.users[anonID]; exists {
+		// Only update if last_seen_at is nil or more than 60 seconds ago
+		if user.LastSeenAt == nil || now.Sub(*user.LastSeenAt) > 60*time.Second {
+			user.LastSeenAt = &now
+		}
+	}
+	return nil
+}
+
+func (s *MemStore) GetActiveUsersCount() (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	count := 0
+	for _, user := range s.users {
+		if user.IsActive {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *MemStore) GetTotalUsersCount() (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return len(s.users), nil
+}
+
+// ReportPost adds a report for a post
+func (s *MemStore) ReportPost(postID, reportedAnonID, reporterAnonID, reason string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.postReports == nil {
+		s.postReports = make(map[string]map[string]bool)
+	}
+	if s.postReports[postID] == nil {
+		s.postReports[postID] = make(map[string]bool)
+	}
+
+	// Idempotent: only add if not already reported by this user
+	s.postReports[postID][reporterAnonID] = true
+	return nil
+}
+
+// GetPostReportCount returns the number of reports for a post
+func (s *MemStore) GetPostReportCount(postID string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.postReports == nil || s.postReports[postID] == nil {
+		return 0
+	}
+	return len(s.postReports[postID])
+}
+
+// GetTopReportedPostByAnon returns the most reported post by a user that meets threshold
+func (s *MemStore) GetTopReportedPostByAnon(anonID string, threshold int) *PostReport {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var topPost *PostReport
+	var maxCount int
+
+	for postID, reporters := range s.postReports {
+		// Check if this post's author matches
+		post, exists := s.getPostByID(postID)
+		if !exists || post.AnonID != anonID {
+			continue
+		}
+
+		count := len(reporters)
+		if count >= threshold && count > maxCount {
+			maxCount = count
+			topPost = &PostReport{
+				PostID:      postID,
+				ReportCount: count,
+				// For MemStore, we don't track timestamp precisely, so use current time
+				LastReportedAt: time.Now(),
+			}
+		}
+	}
+
+	return topPost
+}
+
+// Helper method to get post by ID (internal)
+func (s *MemStore) getPostByID(postID string) (*Post, bool) {
+	for _, p := range s.posts {
+		if p.ID == postID {
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+func (s *MemStore) ReconcileUserActiveStatus(anonID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user, exists := s.users[anonID]
+	if !exists {
+		return nil
+	}
+
+	// Check if user has any active sessions
+	hasActiveSession := false
+	now := time.Now()
+	for _, sess := range s.sessions {
+		if sess.AnonID == anonID && sess.ExpiresAt.After(now) {
+			hasActiveSession = true
+			break
+		}
+	}
+
+	user.IsActive = hasActiveSession
+	return nil
+}
+
+// ===== AUDIT LOGS =====
 
 func (s *MemStore) GetAuditLogs() []AuditLog {
 	s.mu.RLock()

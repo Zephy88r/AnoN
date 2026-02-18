@@ -323,10 +323,15 @@ func (s *PgStore) GetNearby(lat, lng float64, radiusKm float64) []*GeoPing {
 
 func (s *PgStore) GetAllUsers() []*UserInfo {
 	query := `
-		SELECT anon_id, MIN(created_at) AS created_at, COUNT(*) AS post_count
-		FROM posts
-		GROUP BY anon_id
-		ORDER BY post_count DESC
+		SELECT 
+			d.anon_id,
+			d.username,
+			COALESCE(COUNT(p.id), 0) AS post_count,
+			d.created_at
+		FROM devices d
+		LEFT JOIN posts p ON p.anon_id = d.anon_id
+		GROUP BY d.anon_id, d.username, d.created_at
+		ORDER BY d.created_at DESC
 	`
 
 	rows, err := s.db.Query(query)
@@ -339,7 +344,7 @@ func (s *PgStore) GetAllUsers() []*UserInfo {
 	out := []*UserInfo{}
 	for rows.Next() {
 		u := &UserInfo{}
-		if err := rows.Scan(&u.AnonID, &u.CreatedAt, &u.PostCount); err != nil {
+		if err := rows.Scan(&u.AnonID, &u.Username, &u.PostCount, &u.CreatedAt); err != nil {
 			fmt.Printf("error scanning user: %v\n", err)
 			continue
 		}
@@ -620,6 +625,19 @@ func (s *PgStore) CleanupExpiredSessions() (int, error) {
 		return 0, fmt.Errorf("get rows affected: %w", err)
 	}
 
+	// Reconcile all users' active status after cleanup
+	// Mark users inactive if they have no remaining active sessions
+	reconcileQuery := `
+		UPDATE users
+		SET is_active = EXISTS(
+			SELECT 1 FROM sessions 
+			WHERE sessions.anon_id = users.anon_id 
+			AND sessions.expires_at > CURRENT_TIMESTAMP
+		)
+		WHERE is_active = true
+	`
+	_, _ = s.db.Exec(reconcileQuery)
+
 	return int(count), nil
 }
 
@@ -671,6 +689,18 @@ func (s *PgStore) GetSessionsByAnonID(anonID string) ([]*SessionInfo, error) {
 }
 
 func (s *PgStore) RevokeSession(token string) error {
+	// First, get the anonID for this session
+	var anonID string
+	getQuery := `SELECT anon_id FROM sessions WHERE token = $1`
+	err := s.db.QueryRow(getQuery, token).Scan(&anonID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("session not found")
+		}
+		return fmt.Errorf("get session anon_id: %w", err)
+	}
+
+	// Delete the session
 	query := `DELETE FROM sessions WHERE token = $1`
 	result, err := s.db.Exec(query, token)
 	if err != nil {
@@ -686,6 +716,9 @@ func (s *PgStore) RevokeSession(token string) error {
 		return fmt.Errorf("session not found")
 	}
 
+	// Reconcile user active status
+	_ = s.ReconcileUserActiveStatus(anonID)
+
 	return nil
 }
 
@@ -700,6 +733,9 @@ func (s *PgStore) RevokeAllSessionsForUser(anonID string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("get rows affected: %w", err)
 	}
+
+	// Mark user as inactive since all sessions are revoked
+	_ = s.MarkUserInactive(anonID)
 
 	return int(count), nil
 }
@@ -722,6 +758,101 @@ func (s *PgStore) EnforceSessionLimit(anonID string, maxSessions int) error {
 
 	return nil
 }
+
+// ===== USER TRACKING =====
+
+func (s *PgStore) EnsureUser(anonID string, now time.Time) error {
+	query := `
+		INSERT INTO users (anon_id, is_active, last_login_at, last_seen_at, created_at)
+		VALUES ($1, true, $2, $2, $2)
+		ON CONFLICT (anon_id) DO UPDATE SET
+			is_active = true,
+			last_login_at = $2,
+			last_seen_at = $2
+	`
+	_, err := s.db.Exec(query, anonID, now)
+	if err != nil {
+		return fmt.Errorf("ensure user: %w", err)
+	}
+	return nil
+}
+
+func (s *PgStore) MarkUserActive(anonID string, now time.Time) error {
+	query := `
+		UPDATE users
+		SET is_active = true, last_seen_at = $2
+		WHERE anon_id = $1
+	`
+	_, err := s.db.Exec(query, anonID, now)
+	if err != nil {
+		return fmt.Errorf("mark user active: %w", err)
+	}
+	return nil
+}
+
+func (s *PgStore) MarkUserInactive(anonID string) error {
+	query := `UPDATE users SET is_active = false WHERE anon_id = $1`
+	_, err := s.db.Exec(query, anonID)
+	if err != nil {
+		return fmt.Errorf("mark user inactive: %w", err)
+	}
+	return nil
+}
+
+func (s *PgStore) UpdateUserLastSeen(anonID string, now time.Time) error {
+	// Only update if last_seen_at is NULL or more than 60 seconds ago
+	query := `
+		UPDATE users
+		SET last_seen_at = $2
+		WHERE anon_id = $1
+		AND (last_seen_at IS NULL OR last_seen_at < $2 - INTERVAL '60 seconds')
+	`
+	_, err := s.db.Exec(query, anonID, now)
+	if err != nil {
+		return fmt.Errorf("update user last seen: %w", err)
+	}
+	return nil
+}
+
+func (s *PgStore) GetActiveUsersCount() (int, error) {
+	query := `SELECT COUNT(*) FROM users WHERE is_active = true`
+	var count int
+	err := s.db.QueryRow(query).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("get active users count: %w", err)
+	}
+	return count, nil
+}
+
+func (s *PgStore) GetTotalUsersCount() (int, error) {
+	query := `SELECT COUNT(*) FROM users`
+	var count int
+	err := s.db.QueryRow(query).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("get total users count: %w", err)
+	}
+	return count, nil
+}
+
+func (s *PgStore) ReconcileUserActiveStatus(anonID string) error {
+	// Check if user has any active sessions (non-expired)
+	query := `
+		UPDATE users
+		SET is_active = EXISTS(
+			SELECT 1 FROM sessions 
+			WHERE sessions.anon_id = users.anon_id 
+			AND sessions.expires_at > CURRENT_TIMESTAMP
+		)
+		WHERE anon_id = $1
+	`
+	_, err := s.db.Exec(query, anonID)
+	if err != nil {
+		return fmt.Errorf("reconcile user active status: %w", err)
+	}
+	return nil
+}
+
+// ===== AUDIT LOGS =====
 
 func (s *PgStore) LogAuditEvent(event AuditLog) {
 	if event.ID == "" {
