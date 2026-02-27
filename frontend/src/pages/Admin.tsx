@@ -15,6 +15,7 @@ import Panel from "../components/admin/Panel";
 import DataTable from "../components/admin/DataTable";
 import SystemHealthPanel from "../components/admin/SystemHealthPanel";
 import ConfirmationModal from "../components/ConfirmationModal";
+import CopyButton from "../components/CopyButton";
 import PostDetailModal from "../components/PostDetailModal";
 import { formatAdminTime } from "../utils/formatTime";
 import {
@@ -368,15 +369,23 @@ export default function Admin() {
         }
     };
 
+    const matchesAuditFilter = (log: AuditLog, rawFilter: string) => {
+        const searchTerm = rawFilter.trim().toLowerCase();
+        if (!searchTerm) return true;
+
+        const action = (log.action || "").toLowerCase();
+        const actor = (log.anon_id || "").toLowerCase();
+        const details = (log.details || "").toLowerCase();
+
+        return (
+            action.includes(searchTerm) ||
+            actor.includes(searchTerm) ||
+            details.includes(searchTerm)
+        );
+    };
+
     const handleExportAuditLogs = (format: 'csv' | 'json') => {
-        const logsToExport = auditFilter ? auditLogs.filter((log) => {
-            const searchTerm = auditFilter.toLowerCase();
-            return (
-                log.action.toLowerCase().includes(searchTerm) ||
-                log.anon_id.toLowerCase().includes(searchTerm) ||
-                log.details.toLowerCase().includes(searchTerm)
-            );
-        }) : auditLogs;
+        const logsToExport = auditFilter ? auditLogs.filter((log) => matchesAuditFilter(log, auditFilter)) : auditLogs;
 
         if (logsToExport.length === 0) {
             setError("No logs to export");
@@ -425,6 +434,66 @@ export default function Admin() {
     const maskToken = (token: string) => {
         if (token.length <= 8) return token;
         return `${token.slice(0, 4)}...${token.slice(-4)}`;
+    };
+
+    const renderAuditDetails = (details: string) => {
+        const copyableDetailKeys = new Set([
+            "anon_id",
+            "post_id",
+            "comment_id",
+            "reply_id",
+            "token",
+            "session_token",
+            "device_public_id",
+            "code",
+        ]);
+
+        const raw = (details || "").trim();
+        if (!raw) {
+            return <span className="text-slate-400 dark:text-green-300/50">—</span>;
+        }
+
+        const segments = raw.split(",").map((part) => part.trim()).filter(Boolean);
+        const keyValueSegments = segments
+            .map((segment) => {
+                const equalAt = segment.indexOf("=");
+                if (equalAt <= 0 || equalAt >= segment.length - 1) {
+                    return null;
+                }
+
+                const key = segment.slice(0, equalAt).trim();
+                const value = segment.slice(equalAt + 1).trim();
+                if (!key || !value) {
+                    return null;
+                }
+
+                return { key, value };
+            })
+            .filter((pair): pair is { key: string; value: string } => Boolean(pair));
+
+        if (segments.length > 0 && keyValueSegments.length === segments.length) {
+            return (
+                <div className="space-y-1">
+                    {keyValueSegments.map((pair, index) => (
+                        <div key={`${pair.key}-${pair.value}-${index}`} className="flex items-start justify-between gap-2">
+                            <div className="text-xs leading-5 min-w-0">
+                                <span className="text-slate-600 dark:text-green-300/70">{pair.key.replace(/_/g, " ")}: </span>
+                                <span className="font-mono text-slate-800 dark:text-green-200 break-all">{pair.value}</span>
+                            </div>
+                            {copyableDetailKeys.has(pair.key.toLowerCase()) ? (
+                                <CopyButton value={pair.value} size="sm" />
+                            ) : null}
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
+        return (
+            <p className="text-xs leading-5 text-slate-700 dark:text-green-200 whitespace-pre-wrap break-words">
+                {raw}
+            </p>
+        );
     };
 
     const renderDashboard = () => (
@@ -1073,15 +1142,7 @@ export default function Admin() {
     };
 
     const renderAudit = () => {
-        const filteredAuditLogs = auditLogs.filter((log) => {
-            if (!auditFilter.trim()) return true;
-            const searchTerm = auditFilter.toLowerCase();
-            return (
-                log.action.toLowerCase().includes(searchTerm) ||
-                log.anon_id.toLowerCase().includes(searchTerm) ||
-                log.details.toLowerCase().includes(searchTerm)
-            );
-        });
+        const filteredAuditLogs = auditLogs.filter((log) => matchesAuditFilter(log, auditFilter));
 
         const allSelected = filteredAuditLogs.length > 0 && filteredAuditLogs.every((log) => selectedAuditLogs.has(log.id));
 
@@ -1234,7 +1295,8 @@ export default function Admin() {
                         {
                             key: "details",
                             label: "Details",
-                            className: "text-xs max-w-xs truncate",
+                            className: "max-w-lg",
+                            render: (log: AuditLog) => renderAuditDetails(log.details),
                         },
                         {
                             key: "timestamp",
