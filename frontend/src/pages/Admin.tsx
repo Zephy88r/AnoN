@@ -306,6 +306,7 @@ export default function Admin() {
 
     // Audit log handlers
     const handleSelectAuditLog = (id: string) => {
+        if (!id || !id.trim()) return;
         setSelectedAuditLogs((prev) => {
             const next = new Set(prev);
             if (next.has(id)) {
@@ -318,18 +319,22 @@ export default function Admin() {
     };
 
     const handleSelectAllAuditLogs = (isSelected: boolean, filteredLogs: AuditLog[]) => {
+        const selectableIDs = filteredLogs
+            .map((log) => (log.id || "").trim())
+            .filter((id) => id.length > 0);
+
         if (isSelected) {
             // Add all filtered log IDs to selection
             setSelectedAuditLogs((prev) => {
                 const next = new Set(prev);
-                filteredLogs.forEach((log) => next.add(log.id));
+                selectableIDs.forEach((id) => next.add(id));
                 return next;
             });
         } else {
             // Remove all filtered log IDs from selection
             setSelectedAuditLogs((prev) => {
                 const next = new Set(prev);
-                filteredLogs.forEach((log) => next.delete(log.id));
+                selectableIDs.forEach((id) => next.delete(id));
                 return next;
             });
         }
@@ -1010,6 +1015,18 @@ export default function Admin() {
             );
         });
 
+        const abuseRows = abuseReportedFilter === "reported"
+            ? [...filteredAbuse].sort((a, b) => {
+                const aReports = a.reported_post?.report_count ?? 0;
+                const bReports = b.reported_post?.report_count ?? 0;
+                if (bReports !== aReports) return bReports - aReports;
+
+                const aLast = Date.parse(a.reported_post?.last_reported_at || a.last_post_at || "");
+                const bLast = Date.parse(b.reported_post?.last_reported_at || b.last_post_at || "");
+                return (Number.isNaN(bLast) ? 0 : bLast) - (Number.isNaN(aLast) ? 0 : aLast);
+            })
+            : filteredAbuse;
+
         return (
         <div className="space-y-6">
             <div>
@@ -1158,7 +1175,7 @@ export default function Admin() {
                             },
                         },
                     ]}
-                    data={filteredAbuse}
+                    data={abuseRows}
                     keyExtractor={(r) => r.anon_id}
                     emptyMessage={abuseFilter ? "No reports match your search" : "No abuse signals detected"}
                 />
@@ -1169,8 +1186,7 @@ export default function Admin() {
 
     const renderAudit = () => {
         const filteredAuditLogs = auditLogs.filter((log) => matchesAuditFilter(log, auditFilter));
-
-        const allSelected = filteredAuditLogs.length > 0 && filteredAuditLogs.every((log) => selectedAuditLogs.has(log.id));
+        const selectableAuditLogs = filteredAuditLogs.filter((log) => Boolean(log.id && log.id.trim()));
 
         return (
         <div className="space-y-6">
@@ -1268,42 +1284,11 @@ export default function Admin() {
 
             <Panel description="Tracks admin moderation actions for accountability">
                 <DataTable
+                    selectable
+                    selectedItems={selectedAuditLogs}
+                    onSelectItem={handleSelectAuditLog}
+                    onSelectAll={(isSelected) => handleSelectAllAuditLogs(isSelected, selectableAuditLogs)}
                     columns={[
-                        {
-                            key: "select",
-                            label: (
-                                <input
-                                    type="checkbox"
-                                    checked={allSelected}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        handleSelectAllAuditLogs(e.target.checked, filteredAuditLogs);
-                                    }}
-                                    className="rounded border-emerald-500/30 dark:border-green-500/30 
-                                        bg-white/50 dark:bg-black/30
-                                        text-emerald-600 dark:text-green-500
-                                        focus:ring-2 focus:ring-emerald-500/50 dark:focus:ring-green-500/50"
-                                />
-                            ),
-                            render: (log: AuditLog) => (
-                                <div onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedAuditLogs.has(log.id)}
-                                        onChange={(e) => {
-                                            e.stopPropagation();
-                                            handleSelectAuditLog(log.id);
-                                        }}
-                                        onMouseDown={(e) => e.stopPropagation()}
-                                        onKeyDown={(e) => e.stopPropagation()}
-                                        className="rounded border-emerald-500/30 dark:border-green-500/30 
-                                            bg-white/50 dark:bg-black/30
-                                            text-emerald-600 dark:text-green-500
-                                            focus:ring-2 focus:ring-emerald-500/50 dark:focus:ring-green-500/50"
-                                    />
-                                </div>
-                            ),
-                        },
                         {
                             key: "action",
                             label: "Action",
@@ -1334,7 +1319,7 @@ export default function Admin() {
                         },
                     ]}
                     data={filteredAuditLogs}
-                    keyExtractor={(log) => log.id}
+                    keyExtractor={(log, idx) => (log.id && log.id.trim()) ? log.id : `audit-row-${idx}`}
                     emptyMessage={auditFilter ? "No logs match your search" : "No audit events recorded"}
                 />
             </Panel>
