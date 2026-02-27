@@ -84,6 +84,7 @@ export default function Admin() {
     const [feedFilter, setFeedFilter] = useState("");
     const [usersFilter, setUsersFilter] = useState("");
     const [abuseFilter, setAbuseFilter] = useState("");
+    const [abuseReportedFilter, setAbuseReportedFilter] = useState<"all" | "reported" | "not-reported">("all");
     const [auditFilter, setAuditFilter] = useState("");
 
     // Revoke session modal state
@@ -987,12 +988,25 @@ export default function Admin() {
 
     const renderAbuse = () => {
         const filteredAbuse = abuse.filter((report) => {
+            const hasReportedPost = Boolean(report.reported_post);
+
+            if (abuseReportedFilter === "reported" && !hasReportedPost) return false;
+            if (abuseReportedFilter === "not-reported" && hasReportedPost) return false;
+
             if (!abuseFilter.trim()) return true;
             const searchTerm = abuseFilter.toLowerCase();
+
+            const reportedPostID = (report.reported_post?.post_id || "").toLowerCase();
+            const reportedReason = (report.reported_post?.reason || "").toLowerCase();
+            const reportedCount = (report.reported_post?.report_count ?? "").toString();
+
             return (
                 report.anon_id.toLowerCase().includes(searchTerm) ||
                 report.rate_status.toLowerCase().includes(searchTerm) ||
-                report.post_count.toString().includes(searchTerm)
+                report.post_count.toString().includes(searchTerm) ||
+                reportedPostID.includes(searchTerm) ||
+                reportedReason.includes(searchTerm) ||
+                reportedCount.includes(searchTerm)
             );
         });
 
@@ -1006,12 +1020,12 @@ export default function Admin() {
             </div>
 
             {/* Search Bar */}
-            <div className="relative">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-3">
                 <div className="relative">
                     <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 dark:text-green-400/70" />
                     <input
                         type="text"
-                        placeholder="Search by Anon ID, rate status, or post count..."
+                        placeholder="Search Anon ID, status, post ID, reason, or report count..."
                         value={abuseFilter}
                         onChange={(e) => setAbuseFilter(e.target.value)}
                         className="w-full pl-10 pr-10 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20
@@ -1032,12 +1046,24 @@ export default function Admin() {
                         </button>
                     )}
                 </div>
-                {abuseFilter && (
+                <select
+                    value={abuseReportedFilter}
+                    onChange={(e) => setAbuseReportedFilter(e.target.value as "all" | "reported" | "not-reported")}
+                    className="w-full py-3 px-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20
+                        bg-white/50 dark:bg-black/30 backdrop-blur
+                        text-slate-900 dark:text-green-100
+                        focus:outline-none focus:ring-2 focus:ring-emerald-500/50 dark:focus:ring-green-500/50"
+                >
+                    <option value="all">All rows</option>
+                    <option value="reported">Reported posts only</option>
+                    <option value="not-reported">No reported post</option>
+                </select>
+            </div>
+            {(abuseFilter || abuseReportedFilter !== "all") && (
                     <p className="mt-2 text-sm text-slate-600 dark:text-green-300/70">
                         Found {filteredAbuse.length} of {abuse.length} reports
                     </p>
-                )}
-            </div>
+            )}
 
             <Panel description="Highlights accounts with abnormal posting volume. No IP data is collected.">
                 <DataTable
