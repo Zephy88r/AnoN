@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"anon-backend/internal/config"
@@ -77,8 +76,10 @@ func main() {
 		log.Println("⚠ Using in-memory store (set DATABASE_URL for PostgreSQL)")
 	}
 
-	// Seed test data for development
-	store.SeedTestData()
+	if cfg.EnableSeedData {
+		store.SeedTestData()
+		log.Println("⚠ Seed test data enabled")
+	}
 
 	// Start session cleanup job
 	go startSessionCleanupJob()
@@ -93,5 +94,4 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
-	_ = os.Stdout
 }

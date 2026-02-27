@@ -15,6 +15,10 @@ export type AdminUser = {
     username: string;
     created_at: string;
     post_count: number;
+    reported_posts: number;
+    is_banned: boolean;
+    ban_label?: string;
+    ban_expires_at?: string;
 };
 
 export type AdminStats = {
@@ -49,6 +53,7 @@ export type AbuseReport = {
         post_id: string;
         report_count: number;
         last_reported_at: string;
+        reason?: string;
     } | null;
 };
 
@@ -117,6 +122,13 @@ export async function deleteAdminPost(postId: string) {
 
 export async function fetchAdminUsers() {
     return adminFetch<{ users: AdminUser[]; total: number }>("/users");
+}
+
+export async function banAdminUser(anonID: string, banDuration: string) {
+    return adminFetch<{ status: string; anon_id: string; ban_duration: string; is_permanent: boolean; expires_at?: string; sessions_revoked: number }>("/users/ban", {
+        method: "POST",
+        body: JSON.stringify({ anon_id: anonID, ban_duration: banDuration }),
+    });
 }
 
 export async function fetchAdminStats() {

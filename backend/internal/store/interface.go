@@ -83,6 +83,8 @@ type Store interface {
 	GetActiveUsersCount() (int, error)
 	ReconcileUserActiveStatus(anonID string) error
 	GetTotalUsersCount() (int, error)
+	CreateUserBan(anonID, reason string, bannedBy string, now time.Time, expiresAt *time.Time, permanent bool) error
+	GetActiveUserBan(anonID string, now time.Time) (*UserBan, error)
 
 	// Post Reports
 	ReportPost(postID, reportedAnonID, reporterAnonID, reason string, now time.Time) error
@@ -108,6 +110,15 @@ type SessionInfo struct {
 	LastActivityAt time.Time
 }
 
+type UserBan struct {
+	AnonID    string
+	Reason    string
+	BannedBy  string
+	BannedAt  time.Time
+	ExpiresAt *time.Time
+	Permanent bool
+}
+
 type AuditLog struct {
 	ID        string    `json:"id"`
 	Action    string    `json:"action"`
@@ -121,6 +132,7 @@ type PostReport struct {
 	PostID         string
 	ReportCount    int
 	LastReportedAt time.Time
+	Reason         string
 }
 
 // PostSearchResult represents a post with search relevance information

@@ -1,4 +1,4 @@
-import { PropsWithChildren } from "react";
+import type { PropsWithChildren } from "react";
 import bgDark from "../assets/background-dark.png";
 import bgLight from "../assets/background-light.png";
 import frontBg from "../assets/front-background.png";

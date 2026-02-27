@@ -140,13 +140,13 @@ export default function UtilityPanel() {
     }
 
     function SettingsUtility() {
-    const { theme } = useTheme();
+        const { resolvedTheme } = useTheme();
 
     return (
         <>
         <UtilityCard title="Appearance">
             <div className="text-sm text-slate-800 dark:text-green-200">
-            Theme: <span className="font-mono">{theme}</span>
+            Theme: <span className="font-mono">{resolvedTheme}</span>
             </div>
         </UtilityCard>
 

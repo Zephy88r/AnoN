@@ -178,6 +178,16 @@ func SessionBootstrap(cfg config.Config) http.HandlerFunc {
 			_ = store.DefaultStore().UpdateDeviceTimestamp(devicePublicID, now)
 		}
 
+		activeBan, err := store.DefaultStore().GetActiveUserBan(device.AnonID, now)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to verify ban status")
+			return
+		}
+		if activeBan != nil {
+			writeJSONErrorWithDetails(w, http.StatusForbidden, "user is banned", "USER_BANNED", buildBanErrorDetails(activeBan, now))
+			return
+		}
+
 		token, err := security.SignSessionJWT(cfg.JWTSecret, cfg.JWTTTL, device.AnonID, req.Region)
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to sign token")
@@ -279,6 +289,16 @@ func SessionRefresh(cfg config.Config) http.HandlerFunc {
 
 		now := time.Now()
 
+		activeBan, err := store.DefaultStore().GetActiveUserBan(anonID, now)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to verify ban status")
+			return
+		}
+		if activeBan != nil {
+			writeJSONErrorWithDetails(w, http.StatusForbidden, "user is banned", "USER_BANNED", buildBanErrorDetails(activeBan, now))
+			return
+		}
+
 		// Ensure user exists and mark as active
 		if err := store.DefaultStore().EnsureUser(anonID, now); err != nil {
 			log.Printf("WARNING: ensure user failed for %s: %v", anonID, err)
@@ -341,4 +361,25 @@ func isUsernameConflict(err error) bool {
 
 func decodeBase64(input string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(input)
+}
+
+func buildBanErrorDetails(ban *store.UserBan, now time.Time) map[string]interface{} {
+	details := map[string]interface{}{
+		"is_permanent": ban.Permanent,
+	}
+
+	if ban.Permanent || ban.ExpiresAt == nil {
+		details["ban_label"] = "Banned permanently"
+		return details
+	}
+
+	remaining := ban.ExpiresAt.Sub(now)
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	details["ban_expires_at"] = ban.ExpiresAt.Format(time.RFC3339)
+	details["remaining_seconds"] = int64(remaining.Seconds())
+	details["ban_label"] = fmt.Sprintf("Banned until %s", ban.ExpiresAt.Format("2006-01-02 15:04"))
+	return details
 }

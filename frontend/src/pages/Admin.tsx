@@ -18,6 +18,7 @@ import ConfirmationModal from "../components/ConfirmationModal";
 import PostDetailModal from "../components/PostDetailModal";
 import { formatAdminTime } from "../utils/formatTime";
 import {
+    banAdminUser,
     clearAdminToken,
     deleteAdminPost,
     deleteAuditLogs,
@@ -51,6 +52,15 @@ type AdminPage =
     | "map"
     | "abuse"
     | "audit";
+
+const BAN_DURATION_OPTIONS = [
+    { value: "1day", label: "1 day" },
+    { value: "3days", label: "3 days" },
+    { value: "10days", label: "10 days" },
+    { value: "3months", label: "3 months" },
+    { value: "1year", label: "1 year" },
+    { value: "permanent", label: "Permanently" },
+] as const;
 
 export default function Admin() {
     const navigate = useNavigate();
@@ -91,6 +101,13 @@ export default function Admin() {
     const [postDetailModalOpen, setPostDetailModalOpen] = useState(false);
     const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
     const [selectedPostReportCount, setSelectedPostReportCount] = useState(0);
+    const [allowDeleteFromPostModal, setAllowDeleteFromPostModal] = useState(false);
+
+    // Ban user modal state
+    const [banModalOpen, setBanModalOpen] = useState(false);
+    const [selectedUserForBan, setSelectedUserForBan] = useState<AdminUser | null>(null);
+    const [selectedBanDuration, setSelectedBanDuration] = useState<string>("1day");
+    const [isSubmittingBan, setIsSubmittingBan] = useState(false);
 
     const trustSummary = useMemo(() => {
         const summary = { pending: 0, accepted: 0, declined: 0 };
@@ -161,17 +178,66 @@ export default function Admin() {
         setCurrentPage(page as AdminPage);
     };
 
-    const handleDeletePost = async (postId: string) => {
-        if (!confirm("Delete this post? This action is logged.")) return;
+    const handleDeletePost = async (postId: string, confirmFirst: boolean = true) => {
+        if (confirmFirst && !confirm("Delete this post? This action is logged.")) return;
         try {
             await deleteAdminPost(postId);
             setPosts((prev) => prev.filter((p) => p.id !== postId));
-            const [statsRes, auditRes] = await Promise.all([fetchAdminStats(), fetchAdminAudit()]);
+            const [statsRes, auditRes, abuseRes] = await Promise.all([fetchAdminStats(), fetchAdminAudit(), fetchAdminAbuse()]);
             setStats(statsRes);
             setAuditLogs(auditRes.logs);
+            setAbuse(abuseRes.abuse_reports);
+
+            if (selectedPostId === postId) {
+                setPostDetailModalOpen(false);
+                setSelectedPostId(null);
+                setSelectedPostReportCount(0);
+                setAllowDeleteFromPostModal(false);
+            }
         } catch (err) {
             const msg = err instanceof Error ? err.message : "Failed to delete post";
             setError(msg);
+        }
+    };
+
+    const openBanModal = (user: AdminUser) => {
+        if (user.is_banned) {
+            return;
+        }
+        setSelectedUserForBan(user);
+        setSelectedBanDuration("1day");
+        setBanModalOpen(true);
+    };
+
+    const closeBanModal = () => {
+        if (isSubmittingBan) return;
+        setBanModalOpen(false);
+        setSelectedUserForBan(null);
+        setSelectedBanDuration("1day");
+    };
+
+    const handleConfirmBanUser = async () => {
+        if (!selectedUserForBan) return;
+
+        try {
+            setIsSubmittingBan(true);
+            await banAdminUser(selectedUserForBan.anon_id, selectedBanDuration);
+
+            const [usersRes, sessionsRes, auditRes] = await Promise.all([
+                fetchAdminUsers(),
+                fetchAdminSessions(),
+                fetchAdminAudit(),
+            ]);
+
+            setUsers(usersRes.users);
+            setSessions(sessionsRes.sessions);
+            setAuditLogs(auditRes.logs);
+            closeBanModal();
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to ban user";
+            setError(msg);
+        } finally {
+            setIsSubmittingBan(false);
         }
     };
 
@@ -946,12 +1012,52 @@ export default function Admin() {
                                         onClick={() => {
                                             setSelectedPostId(r.reported_post!.post_id);
                                             setSelectedPostReportCount(r.reported_post!.report_count);
+                                            setAllowDeleteFromPostModal(false);
                                             setPostDetailModalOpen(true);
                                         }}
                                         className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-500/15 dark:bg-orange-500/10 border border-orange-500/30 dark:border-orange-500/20 text-orange-700 dark:text-orange-300 hover:bg-orange-500/25 dark:hover:bg-orange-500/15 transition font-mono text-xs cursor-pointer"
                                     >
                                         <span>🚩</span>
                                         <span>{r.reported_post.report_count}</span>
+                                    </button>
+                                );
+                            },
+                        },
+                        {
+                            key: "report_reason",
+                            label: "Reason",
+                            render: (r: AbuseReport) => {
+                                const reason = r.reported_post?.reason?.trim();
+                                if (!reason) {
+                                    return <span className="text-slate-400 dark:text-green-300/50">—</span>;
+                                }
+                                return (
+                                    <span className="text-xs text-slate-700 dark:text-green-200/80">
+                                        {reason}
+                                    </span>
+                                );
+                            },
+                        },
+                        {
+                            key: "actions",
+                            label: "Actions",
+                            render: (r: AbuseReport) => {
+                                const postId = r.reported_post?.post_id;
+                                if (!postId) {
+                                    return <span className="text-slate-400 dark:text-green-300/50">—</span>;
+                                }
+                                return (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedPostId(postId);
+                                            setSelectedPostReportCount(r.reported_post?.report_count || 0);
+                                            setAllowDeleteFromPostModal(true);
+                                            setPostDetailModalOpen(true);
+                                        }}
+                                        className="rounded-lg px-3 py-1 text-xs border border-red-400/40 text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10"
+                                    >
+                                        Delete
                                     </button>
                                 );
                             },
@@ -1155,7 +1261,8 @@ export default function Admin() {
             return (
                 user.anon_id.toLowerCase().includes(searchTerm) ||
                 user.username.toLowerCase().includes(searchTerm) ||
-                user.post_count.toString().includes(searchTerm)
+                user.post_count.toString().includes(searchTerm) ||
+                user.reported_posts.toString().includes(searchTerm)
             );
         });
 
@@ -1222,12 +1329,42 @@ export default function Admin() {
                             ),
                         },
                         {
+                            key: "reported_posts",
+                            label: "Posts Reported",
+                            render: (u: AdminUser) => (
+                                <span className="font-mono">{u.reported_posts}</span>
+                            ),
+                        },
+                        {
                             key: "created_at",
                             label: "First Seen",
                             className: "text-xs",
                             render: (u: AdminUser) => (
                                 <span>{formatAdminTime(u.created_at)}</span>
                             ),
+                        },
+                        {
+                            key: "actions",
+                            label: "Actions",
+                            render: (u: AdminUser) => {
+                                if (u.is_banned) {
+                                    return (
+                                        <span className="inline-flex items-center rounded-lg px-3 py-1 text-xs border border-amber-400/40 text-amber-700 dark:border-amber-500/40 dark:text-amber-300">
+                                            {u.ban_label || "Banned"}
+                                        </span>
+                                    );
+                                }
+
+                                return (
+                                    <button
+                                        type="button"
+                                        onClick={() => openBanModal(u)}
+                                        className="rounded-lg px-3 py-1 text-xs border border-red-400/40 text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10"
+                                    >
+                                        Ban User
+                                    </button>
+                                );
+                            },
                         },
                     ]}
                     data={filteredUsers}
@@ -1351,12 +1488,65 @@ export default function Admin() {
                 open={postDetailModalOpen}
                 postId={selectedPostId}
                 reportCount={selectedPostReportCount}
+                onDelete={allowDeleteFromPostModal && selectedPostId ? () => handleDeletePost(selectedPostId, false) : undefined}
                 onClose={() => {
                     setPostDetailModalOpen(false);
                     setSelectedPostId(null);
                     setSelectedPostReportCount(0);
+                    setAllowDeleteFromPostModal(false);
                 }}
             />
+
+            {banModalOpen && selectedUserForBan && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                    <div className="w-full max-w-lg mx-4 rounded-2xl border border-emerald-500/20 dark:border-green-500/30 bg-white/95 dark:bg-black/90 backdrop-blur-xl shadow-2xl shadow-emerald-500/10 dark:shadow-green-500/20">
+                        <div className="p-6 pb-4">
+                            <h2 className="text-xl font-semibold text-slate-950 dark:text-green-100">Ban User</h2>
+                            <p className="mt-2 text-sm text-slate-700 dark:text-green-300/80">
+                                Select ban duration for user <span className="font-mono">{selectedUserForBan.anon_id.slice(0, 8)}</span>.
+                            </p>
+                        </div>
+
+                        <div className="px-6 pb-2 space-y-2">
+                            {BAN_DURATION_OPTIONS.map((option) => (
+                                <label
+                                    key={option.value}
+                                    className="flex items-center gap-2 rounded-lg border border-emerald-500/15 dark:border-green-500/20 px-3 py-2 cursor-pointer hover:bg-emerald-500/5 dark:hover:bg-green-500/10"
+                                >
+                                    <input
+                                        type="radio"
+                                        name="ban-duration"
+                                        value={option.value}
+                                        checked={selectedBanDuration === option.value}
+                                        onChange={(e) => setSelectedBanDuration(e.target.value)}
+                                        className="h-4 w-4"
+                                    />
+                                    <span className="text-sm text-slate-800 dark:text-green-200">{option.label}</span>
+                                </label>
+                            ))}
+                        </div>
+
+                        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-green-300/10">
+                            <button
+                                type="button"
+                                onClick={closeBanModal}
+                                disabled={isSubmittingBan}
+                                className="rounded-xl px-4 py-2 text-sm font-mono border border-slate-300 dark:border-green-500/30 bg-white dark:bg-black/50 text-slate-700 dark:text-green-300 hover:bg-slate-50 dark:hover:bg-green-500/10 disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmBanUser}
+                                disabled={isSubmittingBan}
+                                className="rounded-xl px-4 py-2 text-sm font-mono border border-red-400/40 dark:border-red-500/40 bg-red-500/10 dark:bg-red-500/20 text-red-700 dark:text-red-300 hover:bg-red-500/20 dark:hover:bg-red-500/30 disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
+                            >
+                                {isSubmittingBan ? "Banning..." : "Ban User"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </AdminLayout>
     );
 }

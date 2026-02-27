@@ -2,7 +2,8 @@
 // This is a reference implementation showing how to use the search API
 
 import { useState } from 'react';
-import { searchPosts, ApiSearchResult } from '../services/postsApi';
+import { searchPosts } from '../services/postsApi';
+import type { ApiSearchResult } from '../services/postsApi';
 
 // Helper to display username or fallback
 const displayUsername = (username?: string, anonId?: string): string => {

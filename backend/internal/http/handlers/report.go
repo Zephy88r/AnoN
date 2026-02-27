@@ -13,8 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-const REPORT_THRESHOLD = 3
-
 func PostReport(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims := httpctx.ClaimsFromContext(r.Context())

@@ -1,9 +1,61 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { refreshSession, isSessionExpired, getTimeUntilExpiry, clearSession } from '../services/session';
+import { ApiError } from '../services/api';
 
 const REFRESH_BEFORE_EXPIRY = 5 * 60 * 1000; // Refresh 5 minutes before expiry
 const CHECK_INTERVAL = 60 * 1000; // Check every minute
+
+type BanErrorPayload = {
+    code?: string;
+    details?: {
+        is_permanent?: boolean;
+        ban_expires_at?: string;
+        remaining_seconds?: number;
+        ban_label?: string;
+    };
+};
+
+function formatRemainingBanTime(seconds: number): string {
+    const total = Math.max(0, Math.floor(seconds));
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days} day${days > 1 ? 's' : ''}`);
+    if (hours > 0) parts.push(`${hours} hour${hours > 1 ? 's' : ''}`);
+    if (minutes > 0 || parts.length === 0) parts.push(`${minutes} minute${minutes !== 1 ? 's' : ''}`);
+    return parts.join(' ');
+}
+
+function getBanMessage(error: unknown): string | null {
+    if (!(error instanceof ApiError) || error.status !== 403) {
+        return null;
+    }
+
+    const payload = error.data as BanErrorPayload;
+    if (payload?.code !== 'USER_BANNED') {
+        return null;
+    }
+
+    if (payload.details?.is_permanent) {
+        return 'You are banned permanently.';
+    }
+
+    if (typeof payload.details?.remaining_seconds === 'number') {
+        return `You are banned for ${formatRemainingBanTime(payload.details.remaining_seconds)}.`;
+    }
+
+    if (payload.details?.ban_expires_at) {
+        const until = new Date(payload.details.ban_expires_at);
+        if (!Number.isNaN(until.getTime())) {
+            return `You are banned until ${until.toLocaleString()}.`;
+        }
+    }
+
+    return payload.details?.ban_label || 'You are currently banned.';
+}
 
 export function useSessionManager() {
     const navigate = useNavigate();
@@ -27,9 +79,18 @@ export function useSessionManager() {
             refreshAttempted.current = false;
         } catch (error) {
             console.error('[SessionManager] Failed to refresh session:', error);
+
+            const banMessage = getBanMessage(error);
+            if (banMessage) {
+                clearSession({ keepDeviceKeys: true });
+                navigate('/', { replace: true });
+                alert(banMessage);
+                return;
+            }
+
             handleSessionExpired();
         }
-    }, [handleSessionExpired]);
+    }, [handleSessionExpired, navigate]);
 
     const checkSession = useCallback(() => {
         // Check if session is expired

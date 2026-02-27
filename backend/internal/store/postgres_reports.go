@@ -35,7 +35,11 @@ func (s *PgStore) GetPostReportCount(postID string) int {
 // GetTopReportedPostByAnon returns the most reported post by a user that meets threshold
 func (s *PgStore) GetTopReportedPostByAnon(anonID string, threshold int) *PostReport {
 	query := `
-		SELECT pr.post_id, COUNT(*) as report_count, MAX(pr.created_at) as last_reported_at
+		SELECT
+			pr.post_id,
+			COUNT(*) as report_count,
+			MAX(pr.created_at) as last_reported_at,
+			(ARRAY_AGG(pr.reason ORDER BY pr.created_at DESC))[1] as reason
 		FROM post_reports pr
 		WHERE pr.reported_anon_id = $1
 		GROUP BY pr.post_id
@@ -46,8 +50,9 @@ func (s *PgStore) GetTopReportedPostByAnon(anonID string, threshold int) *PostRe
 	var postID string
 	var reportCount int
 	var lastReportedAt time.Time
+	var reason sql.NullString
 
-	err := s.db.QueryRow(query, anonID, threshold).Scan(&postID, &reportCount, &lastReportedAt)
+	err := s.db.QueryRow(query, anonID, threshold).Scan(&postID, &reportCount, &lastReportedAt, &reason)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil
@@ -60,5 +65,6 @@ func (s *PgStore) GetTopReportedPostByAnon(anonID string, threshold int) *PostRe
 		PostID:         postID,
 		ReportCount:    reportCount,
 		LastReportedAt: lastReportedAt,
+		Reason:         reason.String,
 	}
 }

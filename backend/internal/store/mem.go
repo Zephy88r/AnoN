@@ -103,6 +103,11 @@ type GeoPing struct {
 	Timestamp time.Time
 }
 
+type postReportMeta struct {
+	Reason    string
+	CreatedAt time.Time
+}
+
 type MemStore struct {
 	mu             sync.RWMutex
 	cards          map[string]*LinkCard                   // code -> card
@@ -120,7 +125,8 @@ type MemStore struct {
 	devices        map[string]*Device                     // device_public_id -> device
 	deviceNonces   map[string]map[string]*DeviceNonce     // device_public_id -> nonce -> device nonce
 	users          map[string]*User                       // anon_id -> user
-	postReports    map[string]map[string]bool             // postID -> reporterAnonID -> true
+	postReports    map[string]map[string]postReportMeta   // postID -> reporterAnonID -> report metadata
+	userBans       map[string]*UserBan                    // anonID -> active/latest ban
 }
 
 type User struct {
@@ -149,7 +155,8 @@ func NewMemStore() *MemStore {
 		devices:        make(map[string]*Device),
 		deviceNonces:   make(map[string]map[string]*DeviceNonce),
 		users:          make(map[string]*User),
-		postReports:    make(map[string]map[string]bool),
+		postReports:    make(map[string]map[string]postReportMeta),
+		userBans:       make(map[string]*UserBan),
 	}
 }
 
@@ -845,20 +852,69 @@ func (s *MemStore) GetTotalUsersCount() (int, error) {
 	return len(s.users), nil
 }
 
+func (s *MemStore) CreateUserBan(anonID, reason string, bannedBy string, now time.Time, expiresAt *time.Time, permanent bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var expiryCopy *time.Time
+	if expiresAt != nil {
+		t := *expiresAt
+		expiryCopy = &t
+	}
+
+	s.userBans[anonID] = &UserBan{
+		AnonID:    anonID,
+		Reason:    reason,
+		BannedBy:  bannedBy,
+		BannedAt:  now,
+		ExpiresAt: expiryCopy,
+		Permanent: permanent,
+	}
+
+	return nil
+}
+
+func (s *MemStore) GetActiveUserBan(anonID string, now time.Time) (*UserBan, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ban, exists := s.userBans[anonID]
+	if !exists || ban == nil {
+		return nil, nil
+	}
+
+	if ban.Permanent {
+		copyBan := *ban
+		return &copyBan, nil
+	}
+
+	if ban.ExpiresAt != nil && ban.ExpiresAt.After(now) {
+		copyBan := *ban
+		return &copyBan, nil
+	}
+
+	return nil, nil
+}
+
 // ReportPost adds a report for a post
 func (s *MemStore) ReportPost(postID, reportedAnonID, reporterAnonID, reason string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.postReports == nil {
-		s.postReports = make(map[string]map[string]bool)
+		s.postReports = make(map[string]map[string]postReportMeta)
 	}
 	if s.postReports[postID] == nil {
-		s.postReports[postID] = make(map[string]bool)
+		s.postReports[postID] = make(map[string]postReportMeta)
 	}
 
 	// Idempotent: only add if not already reported by this user
-	s.postReports[postID][reporterAnonID] = true
+	if _, exists := s.postReports[postID][reporterAnonID]; !exists {
+		s.postReports[postID][reporterAnonID] = postReportMeta{
+			Reason:    reason,
+			CreatedAt: now,
+		}
+	}
 	return nil
 }
 
@@ -881,21 +937,29 @@ func (s *MemStore) GetTopReportedPostByAnon(anonID string, threshold int) *PostR
 	var topPost *PostReport
 	var maxCount int
 
-	for postID, reporters := range s.postReports {
+	for postID, reportsByReporter := range s.postReports {
 		// Check if this post's author matches
 		post, exists := s.getPostByID(postID)
 		if !exists || post.AnonID != anonID {
 			continue
 		}
 
-		count := len(reporters)
+		count := len(reportsByReporter)
+		var lastReportedAt time.Time
+		latestReason := ""
+		for _, report := range reportsByReporter {
+			if report.CreatedAt.After(lastReportedAt) {
+				lastReportedAt = report.CreatedAt
+				latestReason = report.Reason
+			}
+		}
 		if count >= threshold && count > maxCount {
 			maxCount = count
 			topPost = &PostReport{
-				PostID:      postID,
-				ReportCount: count,
-				// For MemStore, we don't track timestamp precisely, so use current time
-				LastReportedAt: time.Now(),
+				PostID:         postID,
+				ReportCount:    count,
+				LastReportedAt: lastReportedAt,
+				Reason:         latestReason,
 			}
 		}
 	}

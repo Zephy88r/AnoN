@@ -29,7 +29,7 @@ func NewRouter(cfg config.Config) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(CORS([]string{"http://localhost:5173"}))
+	r.Use(CORS(cfg.CORSAllowedOrigins))
 
 	// ✅ shared stores
 	str := store.DefaultStore()
@@ -97,6 +97,7 @@ func NewRouter(cfg config.Config) http.Handler {
 		ar.Get("/posts/{id}", handlers.AdminGetPostDetail(cfg))
 		ar.Post("/posts/delete", handlers.AdminDeletePost(cfg))
 		ar.Get("/users", handlers.AdminGetUsers(cfg))
+		ar.Post("/users/ban", handlers.AdminBanUser(cfg))
 		ar.Get("/stats", handlers.AdminGetStats(cfg))
 		ar.Get("/sessions", handlers.AdminGetSessions(cfg))
 		ar.Get("/sessions/user", handlers.AdminGetUserSessions(cfg))

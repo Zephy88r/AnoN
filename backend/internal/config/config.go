@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -15,6 +16,8 @@ type Config struct {
 	AdminEmail         string
 	AdminPass          string
 	MaxSessionsPerUser int
+	CORSAllowedOrigins []string
+	EnableSeedData     bool
 }
 
 func Load() Config {
@@ -41,6 +44,13 @@ func Load() Config {
 		}
 	}
 
+	corsAllowedOrigins := splitCSV(getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173"))
+	if len(corsAllowedOrigins) == 0 {
+		corsAllowedOrigins = []string{"http://localhost:5173"}
+	}
+
+	enableSeedData := strings.EqualFold(getenv("ENABLE_SEED_DATA", "false"), "true")
+
 	return Config{
 		Addr:               addr,
 		JWTSecret:          jwtSecret,
@@ -50,7 +60,21 @@ func Load() Config {
 		AdminEmail:         adminEmail,
 		AdminPass:          adminPass,
 		MaxSessionsPerUser: maxSessions,
+		CORSAllowedOrigins: corsAllowedOrigins,
+		EnableSeedData:     enableSeedData,
 	}
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func getenv(k, def string) string {

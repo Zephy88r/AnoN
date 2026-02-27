@@ -107,7 +107,7 @@ export default function Trust() {
                         incoming: {shortKey(r.peerKey)}
                     </div>
                     <div className="font-mono text-xs text-slate-500 dark:text-green-300/60">
-                        {timeAgo(r.createdAtISO)}
+                        {timeAgo(r.createdAtISO ?? new Date().toISOString())}
                         {r.code ? ` • code ${r.code}` : ""}
                     </div>
                     </div>
@@ -174,7 +174,7 @@ export default function Trust() {
                         peer: {shortKey(r.peerKey)}
                     </div>
                     <div className="font-mono text-xs text-slate-500 dark:text-green-300/60">
-                        {timeAgo(r.createdAtISO)}
+                        {timeAgo(r.createdAtISO ?? new Date().toISOString())}
                         {r.code ? ` • code ${r.code}` : ""}
                     </div>
                     </div>

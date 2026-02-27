@@ -2,10 +2,35 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import bg from "../assets/front-background.png";
 import { bootstrapSession } from "../services/session";
+import { ApiError } from "../services/api";
+
+type BanErrorPayload = {
+    code?: string;
+    details?: {
+        is_permanent?: boolean;
+        ban_expires_at?: string;
+        remaining_seconds?: number;
+        ban_label?: string;
+    };
+};
+
+function formatRemainingBanTime(seconds: number): string {
+    const total = Math.max(0, Math.floor(seconds));
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days} day${days > 1 ? "s" : ""}`);
+    if (hours > 0) parts.push(`${hours} hour${hours > 1 ? "s" : ""}`);
+    if (minutes > 0 || parts.length === 0) parts.push(`${minutes} minute${minutes !== 1 ? "s" : ""}`);
+    return parts.join(" ");
+}
 
 export default function Landing() {
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
+    const [banPopupMessage, setBanPopupMessage] = useState<string | null>(null);
 
     const handleEnter = async () => {
         if (loading) return;
@@ -15,6 +40,32 @@ export default function Landing() {
             navigate("/app/feed");
         } catch (error) {
             console.error("[Landing] Bootstrap failed:", error);
+            if (error instanceof ApiError && error.status === 403) {
+                const payload = error.data as BanErrorPayload;
+                if (payload?.code === "USER_BANNED") {
+                    if (payload.details?.is_permanent) {
+                        setBanPopupMessage("You are banned permanently.");
+                        return;
+                    }
+
+                    const remainingSeconds = payload.details?.remaining_seconds;
+                    if (typeof remainingSeconds === "number") {
+                        setBanPopupMessage(`You are banned for ${formatRemainingBanTime(remainingSeconds)}.`);
+                        return;
+                    }
+
+                    if (payload.details?.ban_expires_at) {
+                        const until = new Date(payload.details.ban_expires_at);
+                        if (!Number.isNaN(until.getTime())) {
+                            setBanPopupMessage(`You are banned until ${until.toLocaleString()}.`);
+                            return;
+                        }
+                    }
+
+                    setBanPopupMessage(payload.details?.ban_label || "You are currently banned.");
+                    return;
+                }
+            }
         } finally {
             setLoading(false);
         }
@@ -54,6 +105,24 @@ export default function Landing() {
             Tip: Ghost mode is ON by default.
             </p>
         </div>
+
+        {banPopupMessage && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+                <div className="w-full max-w-md rounded-2xl border border-red-500/30 bg-black/90 p-6 shadow-2xl">
+                    <h2 className="text-lg font-semibold text-red-300">Access denied</h2>
+                    <p className="mt-3 text-sm text-red-100">{banPopupMessage}</p>
+                    <div className="mt-5 flex justify-end">
+                        <button
+                            type="button"
+                            onClick={() => setBanPopupMessage(null)}
+                            className="rounded-xl border border-red-400/40 bg-red-500/10 hover:bg-red-500/20 px-4 py-2 text-sm font-mono text-red-200"
+                        >
+                            OK
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
         </div>
     );
 }

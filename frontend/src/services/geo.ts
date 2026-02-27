@@ -94,7 +94,8 @@ function loadPulses(): StoredPulse[] {
     }
 
     function savePulses(pulses: StoredPulse[]) {
-        storage.setJSON(key, pulses, { version: 1 });    }
+        storage.setJSON(LS_KEY, pulses, { version: 1 });
+    }
 
     // device anon id (temporary)
     export function getAnonDeviceKey() {

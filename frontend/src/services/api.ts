@@ -8,6 +8,18 @@ const LEGACY_TOKEN_KEY = "session_token";
 let isRebootstrapping = false;
 let rebootstrapPromise: Promise<void> | null = null;
 
+export class ApiError extends Error {
+    status: number;
+    data: unknown;
+
+    constructor(status: number, message: string, data: unknown) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+        this.data = data;
+    }
+}
+
 function unwrapToken(raw: unknown): string | null {
   // raw might already be string OR stringified string
     if (typeof raw !== "string" || !raw) return null;
@@ -127,14 +139,25 @@ async function rebootstrapOnce(): Promise<void> {
             return apiFetch<T>(path, options, { ...config, _isRetry: true });
         } catch (err) {
             console.error("[api] rebootstrap failed, cannot retry:", err);
+            if (err instanceof ApiError) {
+                throw err;
+            }
             // Fall through to normal error handling
         }
     }
 
     if (!res.ok) {
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+            const json = await res.json().catch(() => null);
+            console.error(`[api] Error ${res.status} for ${path}:`, json);
+            const message = typeof json?.error === "string" ? json.error : `API ${res.status}`;
+            throw new ApiError(res.status, message, json);
+        }
+
         const text = await res.text().catch(() => "");
         console.error(`[api] Error ${res.status} for ${path}:`, text);
-        throw new Error(`API ${res.status}: ${text}`);
+        throw new ApiError(res.status, `API ${res.status}: ${text}`, text);
     }
 
     const ct = res.headers.get("content-type") || "";

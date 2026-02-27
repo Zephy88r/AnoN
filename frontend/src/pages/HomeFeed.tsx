@@ -12,6 +12,15 @@ const displayUsername = (username?: string, anonId?: string): string => {
     return username || `User #${anonId?.substring(0, 8) || 'unknown'}`;
 };
 
+const REPORT_REASON_OPTIONS = [
+    "Spam",
+    "Harassment or hate",
+    "Violence or threat",
+    "Sexual content",
+    "Misinformation",
+    "Other",
+];
+
 export default function HomeFeed() {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -48,6 +57,10 @@ export default function HomeFeed() {
     // Step B modal state
     const [trustOpen, setTrustOpen] = useState(false);
     const [pendingPostId, setPendingPostId] = useState<string | null>(null);
+    const [reportModalOpen, setReportModalOpen] = useState(false);
+    const [reportPostId, setReportPostId] = useState<string | null>(null);
+    const [reportReason, setReportReason] = useState("");
+    const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
     // Load my anon ID on mount
     useEffect(() => {
@@ -166,13 +179,33 @@ export default function HomeFeed() {
         }
     };
 
-    const handleReportPost = async (postId: string) => {
+    const openReportModal = (postId: string) => {
+        setReportPostId(postId);
+        setReportReason("");
+        setReportModalOpen(true);
+    };
+
+    const closeReportModal = () => {
+        setReportModalOpen(false);
+        setReportPostId(null);
+        setReportReason("");
+    };
+
+    const handleReportPost = async () => {
+        if (!reportPostId || !reportReason.trim()) {
+            return;
+        }
+
+        setIsSubmittingReport(true);
         try {
-            await reportPost(postId);
+            await reportPost(reportPostId, reportReason);
             alert("Post reported successfully");
+            closeReportModal();
         } catch (err) {
             console.error("Failed to report post:", err);
             alert("Failed to report post. Please try again.");
+        } finally {
+            setIsSubmittingReport(false);
         }
     };
 
@@ -585,8 +618,6 @@ export default function HomeFeed() {
                 <div className="space-y-4">
                     {searchResults.map((result) => {
                         const post = result.post;
-                        const userKey = `user_${post.anon_id.substring(0, 8)}`;
-                        const status = getStatusForUser(userKey);
 
                         const timeAgo = (isoDate: string) => {
                             const minutes = Math.floor((Date.now() - new Date(isoDate).getTime()) / 60000);
@@ -834,7 +865,7 @@ export default function HomeFeed() {
                         {myAnonId && post.anon_id !== myAnonId && (
                             <button
                                 type="button"
-                                onClick={() => handleReportPost(post.id)}
+                                onClick={() => openReportModal(post.id)}
                                 className="text-slate-400 dark:text-green-300/50 hover:text-orange-600 dark:hover:text-orange-400 transition"
                                 title="Report this post"
                             >
@@ -1229,6 +1260,53 @@ export default function HomeFeed() {
             })}
         </div>
         ))}
+
+        {reportModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                <div className="w-full max-w-md rounded-2xl border border-emerald-500/20 dark:border-green-500/20 bg-white dark:bg-slate-900 p-5 shadow-xl">
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-green-100">Report post</h3>
+                    <p className="mt-1 text-sm text-slate-600 dark:text-green-300/70">Select a reason for this report.</p>
+
+                    <div className="mt-4 space-y-2">
+                        {REPORT_REASON_OPTIONS.map((option) => (
+                            <label
+                                key={option}
+                                className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-green-500/20 px-3 py-2 text-sm text-slate-800 dark:text-green-200 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                            >
+                                <input
+                                    type="radio"
+                                    name="report_reason"
+                                    value={option}
+                                    checked={reportReason === option}
+                                    onChange={(e) => setReportReason(e.target.value)}
+                                    className="h-4 w-4"
+                                />
+                                <span>{option}</span>
+                            </label>
+                        ))}
+                    </div>
+
+                    <div className="mt-5 flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={closeReportModal}
+                            disabled={isSubmittingReport}
+                            className="rounded-lg px-3 py-2 text-sm border border-slate-300 dark:border-green-500/30 text-slate-700 dark:text-green-300 hover:bg-slate-50 dark:hover:bg-green-500/10 disabled:opacity-60"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleReportPost}
+                            disabled={!reportReason || isSubmittingReport}
+                            className="rounded-lg px-3 py-2 text-sm font-mono bg-emerald-600 dark:bg-green-500/20 text-white dark:text-green-200 hover:bg-emerald-700 dark:hover:bg-green-500/30 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                            {isSubmittingReport ? "Reporting..." : "Submit report"}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
         
         {/* Trust Request Modal */}
         <TrustRequestModal

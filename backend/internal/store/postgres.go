@@ -852,6 +852,53 @@ func (s *PgStore) ReconcileUserActiveStatus(anonID string) error {
 	return nil
 }
 
+func (s *PgStore) CreateUserBan(anonID, reason string, bannedBy string, now time.Time, expiresAt *time.Time, permanent bool) error {
+	query := `
+		INSERT INTO user_bans (anon_id, reason, banned_by, banned_at, expires_at, is_permanent)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	_, err := s.db.Exec(query, anonID, reason, bannedBy, now, expiresAt, permanent)
+	if err != nil {
+		return fmt.Errorf("create user ban: %w", err)
+	}
+	return nil
+}
+
+func (s *PgStore) GetActiveUserBan(anonID string, now time.Time) (*UserBan, error) {
+	query := `
+		SELECT anon_id, reason, banned_by, banned_at, expires_at, is_permanent
+		FROM user_bans
+		WHERE anon_id = $1
+			AND banned_at <= $2
+			AND (is_permanent = true OR expires_at > $2)
+		ORDER BY banned_at DESC
+		LIMIT 1
+	`
+
+	var ban UserBan
+	var expiresAt sql.NullTime
+	err := s.db.QueryRow(query, anonID, now).Scan(
+		&ban.AnonID,
+		&ban.Reason,
+		&ban.BannedBy,
+		&ban.BannedAt,
+		&expiresAt,
+		&ban.Permanent,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get active user ban: %w", err)
+	}
+
+	if expiresAt.Valid {
+		ban.ExpiresAt = &expiresAt.Time
+	}
+
+	return &ban, nil
+}
+
 // ===== AUDIT LOGS =====
 
 func (s *PgStore) LogAuditEvent(event AuditLog) {

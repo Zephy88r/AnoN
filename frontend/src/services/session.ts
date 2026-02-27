@@ -94,9 +94,11 @@ async function deriveDeviceSecretHash(deviceSecret: string, devicePublicId: stri
 async function computeProof(deviceSecretHash: string, message: string): Promise<string> {
     const encoder = new TextEncoder();
     const keyBytes = bytesFromBase64(deviceSecretHash);
+    const keyBytesSafe = new Uint8Array(keyBytes.length);
+    keyBytesSafe.set(keyBytes);
     const key = await crypto.subtle.importKey(
         "raw",
-        keyBytes,
+        keyBytesSafe.buffer,
         { name: "HMAC", hash: "SHA-256" },
         false,
         ["sign"]

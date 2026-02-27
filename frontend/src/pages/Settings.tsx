@@ -7,7 +7,7 @@ const card =
     "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-4";
 
 export default function Settings() {
-    const { theme } = useTheme();
+    const { resolvedTheme } = useTheme();
     const navigate = useNavigate();
 
     // stable anon id (shortened for display)
@@ -43,7 +43,7 @@ export default function Settings() {
                 Theme
             </span>
             <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
-                {theme}
+                {resolvedTheme}
             </span>
             </div>
 

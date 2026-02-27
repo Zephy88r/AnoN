@@ -91,7 +91,7 @@ export default function DataTable<T>({
                                             />
                                         </td>
                                     )}
-                                    {columns.map((col, colIdx) => (
+                                    {columns.map((col) => (
                                         <td 
                                             key={`${key}-${col.key}`} 
                                             className={`py-3 ${col.className || ""}`}

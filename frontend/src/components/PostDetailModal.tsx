@@ -8,9 +8,10 @@ interface PostDetailModalProps {
     postId: string | null;
     onClose: () => void;
     reportCount?: number;
+    onDelete?: () => void;
 }
 
-export default function PostDetailModal({ open, postId, onClose, reportCount = 0 }: PostDetailModalProps) {
+export default function PostDetailModal({ open, postId, onClose, reportCount = 0, onDelete }: PostDetailModalProps) {
     const [post, setPost] = useState<AdminPostDetail | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -96,7 +97,7 @@ export default function PostDetailModal({ open, postId, onClose, reportCount = 0
                             {/* Content */}
                             <div>
                                 <label className="text-xs font-mono text-slate-500 dark:text-green-300/60">Content</label>
-                                <p className="text-sm text-slate-700 dark:text-green-100 break-words bg-slate-50 dark:bg-slate-800/50 rounded p-2 border border-slate-200 dark:border-green-500/10 max-h-48 overflow-y-auto">
+                                <p className="text-sm text-slate-700 dark:text-green-100 wrap-break-word bg-slate-50 dark:bg-slate-800/50 rounded p-2 border border-slate-200 dark:border-green-500/10 max-h-48 overflow-y-auto">
                                     {post.text}
                                 </p>
                             </div>
@@ -127,6 +128,14 @@ export default function PostDetailModal({ open, postId, onClose, reportCount = 0
                 </div>
 
                 <div className="border-t border-emerald-500/20 dark:border-green-500/20 p-3 flex justify-end">
+                    {onDelete && (
+                        <button
+                            onClick={onDelete}
+                            className="rounded-lg px-4 py-2 text-sm font-mono border border-red-400/40 text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10 transition mr-2"
+                        >
+                            Delete Post
+                        </button>
+                    )}
                     <button
                         onClick={onClose}
                         className="rounded-lg px-4 py-2 text-sm font-mono border border-emerald-500/20 dark:border-green-500/20 text-slate-700 dark:text-green-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition"

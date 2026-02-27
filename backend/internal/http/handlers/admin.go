@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,10 +24,14 @@ type AdminPostDTO struct {
 }
 
 type AdminUserDTO struct {
-	AnonID    string `json:"anon_id"`
-	Username  string `json:"username"`
-	CreatedAt string `json:"created_at"`
-	PostCount int    `json:"post_count"`
+	AnonID        string `json:"anon_id"`
+	Username      string `json:"username"`
+	CreatedAt     string `json:"created_at"`
+	PostCount     int    `json:"post_count"`
+	ReportedPosts int    `json:"reported_posts"`
+	IsBanned      bool   `json:"is_banned"`
+	BanLabel      string `json:"ban_label,omitempty"`
+	BanExpiresAt  string `json:"ban_expires_at,omitempty"`
 }
 
 type AdminStatsResponse struct {
@@ -59,6 +64,7 @@ type ReportInfo struct {
 	PostID         string `json:"post_id"`
 	ReportCount    int    `json:"report_count"`
 	LastReportedAt string `json:"last_reported_at"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 type AdminLoginRequest struct {
@@ -127,14 +133,41 @@ func AdminGetPosts(cfg config.Config) http.HandlerFunc {
 func AdminGetUsers(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		users := store.DefaultStore().GetAllUsers()
+		posts := store.DefaultStore().GetFeed(10000)
+		now := time.Now()
+
+		reportsByUser := make(map[string]int)
+		for _, post := range posts {
+			reportsByUser[post.AnonID] += store.DefaultStore().GetPostReportCount(post.ID)
+		}
 
 		out := make([]AdminUserDTO, len(users))
 		for i, u := range users {
+			activeBan, err := store.DefaultStore().GetActiveUserBan(u.AnonID, now)
+			if err != nil {
+				http.Error(w, "failed to load user bans", http.StatusInternalServerError)
+				return
+			}
+
+			isBanned := activeBan != nil
+			banLabel := ""
+			banExpiresAt := ""
+			if activeBan != nil {
+				banLabel = activeBanLabel(activeBan)
+				if activeBan.ExpiresAt != nil {
+					banExpiresAt = activeBan.ExpiresAt.Format(time.RFC3339)
+				}
+			}
+
 			out[i] = AdminUserDTO{
-				AnonID:    u.AnonID,
-				Username:  u.Username,
-				CreatedAt: u.CreatedAt.Format(time.RFC3339),
-				PostCount: u.PostCount,
+				AnonID:        u.AnonID,
+				Username:      u.Username,
+				CreatedAt:     u.CreatedAt.Format(time.RFC3339),
+				PostCount:     u.PostCount,
+				ReportedPosts: reportsByUser[u.AnonID],
+				IsBanned:      isBanned,
+				BanLabel:      banLabel,
+				BanExpiresAt:  banExpiresAt,
 			}
 		}
 
@@ -144,6 +177,131 @@ func AdminGetUsers(cfg config.Config) http.HandlerFunc {
 			"total": len(out),
 		})
 	}
+}
+
+func AdminBanUser(cfg config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			AnonID      string `json:"anon_id"`
+			BanDuration string `json:"ban_duration"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+
+		req.AnonID = strings.TrimSpace(req.AnonID)
+		req.BanDuration = strings.TrimSpace(req.BanDuration)
+		if req.AnonID == "" || req.BanDuration == "" {
+			http.Error(w, "anon_id and ban_duration required", http.StatusBadRequest)
+			return
+		}
+
+		now := time.Now()
+		activeBan, err := store.DefaultStore().GetActiveUserBan(req.AnonID, now)
+		if err != nil {
+			http.Error(w, "failed to verify existing ban", http.StatusInternalServerError)
+			return
+		}
+		if activeBan != nil {
+			http.Error(w, fmt.Sprintf("user already banned: %s", activeBanLabel(activeBan)), http.StatusConflict)
+			return
+		}
+
+		expiresAt, permanent, err := parseBanDuration(req.BanDuration, now)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if err := store.DefaultStore().CreateUserBan(req.AnonID, "admin moderation ban", "admin", now, expiresAt, permanent); err != nil {
+			http.Error(w, "failed to create user ban", http.StatusInternalServerError)
+			return
+		}
+
+		revoked, err := store.DefaultStore().RevokeAllSessionsForUser(req.AnonID)
+		if err != nil {
+			http.Error(w, "failed to revoke user sessions", http.StatusInternalServerError)
+			return
+		}
+
+		details := fmt.Sprintf("anon_id=%s, duration=%s, permanent=%t", req.AnonID, req.BanDuration, permanent)
+		if expiresAt != nil {
+			details = fmt.Sprintf("%s, expires_at=%s", details, expiresAt.Format(time.RFC3339))
+		}
+		store.DefaultStore().LogAuditEvent(store.AuditLog{
+			Action:  "ban_user",
+			AnonID:  "admin",
+			Details: details,
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		resp := map[string]interface{}{
+			"status":           "success",
+			"anon_id":          req.AnonID,
+			"ban_duration":     req.BanDuration,
+			"is_permanent":     permanent,
+			"sessions_revoked": revoked,
+		}
+		if expiresAt != nil {
+			resp["expires_at"] = expiresAt.Format(time.RFC3339)
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+func activeBanLabel(ban *store.UserBan) string {
+	if ban == nil {
+		return ""
+	}
+	if ban.Permanent || ban.ExpiresAt == nil {
+		return "Banned permanently"
+	}
+
+	switch {
+	case ban.BannedAt.Add(24 * time.Hour).Equal(*ban.ExpiresAt):
+		return "Banned for 1 day"
+	case ban.BannedAt.Add(72 * time.Hour).Equal(*ban.ExpiresAt):
+		return "Banned for 3 days"
+	case ban.BannedAt.Add(24 * time.Hour * 10).Equal(*ban.ExpiresAt):
+		return "Banned for 10 days"
+	case ban.BannedAt.AddDate(0, 3, 0).Equal(*ban.ExpiresAt):
+		return "Banned for 3 months"
+	case ban.BannedAt.AddDate(1, 0, 0).Equal(*ban.ExpiresAt):
+		return "Banned for 1 year"
+	default:
+		return fmt.Sprintf("Banned until %s", ban.ExpiresAt.Format("2006-01-02"))
+	}
+}
+
+func parseBanDuration(input string, now time.Time) (*time.Time, bool, error) {
+	normalized := strings.ToLower(strings.TrimSpace(input))
+	var until time.Time
+
+	switch normalized {
+	case "1day", "1 day", "1d":
+		until = now.Add(24 * time.Hour)
+	case "3days", "3 days", "3d":
+		until = now.Add(72 * time.Hour)
+	case "10days", "10 days", "10d":
+		until = now.Add(24 * time.Hour * 10)
+	case "3months", "3 months", "3mo":
+		until = now.AddDate(0, 3, 0)
+	case "1year", "1 year", "1y":
+		until = now.AddDate(1, 0, 0)
+	case "permanent", "perm":
+		return nil, true, nil
+	default:
+		return nil, false, fmt.Errorf("invalid ban_duration")
+	}
+
+	return &until, false, nil
 }
 
 func AdminDeletePost(cfg config.Config) http.HandlerFunc {
@@ -347,9 +505,38 @@ func AdminGetAbuseDashboard(cfg config.Config) http.HandlerFunc {
 			userStatsMap[p.AnonID] = stats
 		}
 
-		reports := make([]AbuseReport, 0)
+		fallbackTopReportedByAnon := make(map[string]ReportInfo)
+		for _, p := range posts {
+			reportCount := store.DefaultStore().GetPostReportCount(p.ID)
+			if reportCount < 1 {
+				continue
+			}
+			current, exists := fallbackTopReportedByAnon[p.AnonID]
+			if !exists || reportCount > current.ReportCount {
+				fallbackTopReportedByAnon[p.AnonID] = ReportInfo{
+					PostID:      p.ID,
+					ReportCount: reportCount,
+				}
+			}
+		}
+
+		anonIDSet := make(map[string]struct{})
 		for _, u := range users {
-			stats := userStatsMap[u.AnonID]
+			anonIDSet[u.AnonID] = struct{}{}
+		}
+		for _, p := range posts {
+			anonIDSet[p.AnonID] = struct{}{}
+		}
+
+		anonIDs := make([]string, 0, len(anonIDSet))
+		for anonID := range anonIDSet {
+			anonIDs = append(anonIDs, anonID)
+		}
+		sort.Strings(anonIDs)
+
+		reports := make([]AbuseReport, 0, len(anonIDs))
+		for _, anonID := range anonIDs {
+			stats := userStatsMap[anonID]
 			rateStatus := "normal"
 			if stats.PostCount > 20 {
 				rateStatus = "warning"
@@ -358,21 +545,32 @@ func AdminGetAbuseDashboard(cfg config.Config) http.HandlerFunc {
 				rateStatus = "blocked"
 			}
 
-			// Get top reported post for this user if it meets threshold
+			lastPostAt := ""
+			if !stats.LastPostAt.IsZero() {
+				lastPostAt = stats.LastPostAt.Format(time.RFC3339)
+			}
+
+			// Get top reported post for this user if there is at least one report
 			var reportedPost *ReportInfo
-			topReport := store.DefaultStore().GetTopReportedPostByAnon(u.AnonID, REPORT_THRESHOLD)
+			topReport := store.DefaultStore().GetTopReportedPostByAnon(anonID, 1)
 			if topReport != nil {
 				reportedPost = &ReportInfo{
 					PostID:         topReport.PostID,
 					ReportCount:    topReport.ReportCount,
 					LastReportedAt: topReport.LastReportedAt.Format(time.RFC3339),
+					Reason:         topReport.Reason,
+				}
+			} else if fallback, ok := fallbackTopReportedByAnon[anonID]; ok {
+				reportedPost = &ReportInfo{
+					PostID:      fallback.PostID,
+					ReportCount: fallback.ReportCount,
 				}
 			}
 
 			reports = append(reports, AbuseReport{
-				AnonID:       u.AnonID,
+				AnonID:       anonID,
 				PostCount:    stats.PostCount,
-				LastPostAt:   stats.LastPostAt.Format(time.RFC3339),
+				LastPostAt:   lastPostAt,
 				RateStatus:   rateStatus,
 				ReportedPost: reportedPost,
 			})
