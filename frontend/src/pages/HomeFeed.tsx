@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import TrustRequestModal from "../components/TrustRequestModal";
 import { useTrust } from "../contexts/TrustContext";
@@ -39,6 +39,8 @@ export default function HomeFeed() {
     const [searchResults, setSearchResults] = useState<ApiSearchResult[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [searchTotalCount, setSearchTotalCount] = useState(0);
+    const searchDebounceRef = useRef<number | null>(null);
+    const latestSearchRequestRef = useRef(0);
 
     // Comment state
     const [commentText, setCommentText] = useState<Record<string, string>>({});
@@ -476,28 +478,62 @@ export default function HomeFeed() {
 
 
     // Search handlers
-    const handleSearch = async () => {
-        const query = searchQuery.trim();
+    const runSearch = async (rawQuery: string) => {
+        const query = rawQuery.trim();
+        const requestId = Date.now();
+        latestSearchRequestRef.current = requestId;
+
         if (!query) {
-            alert("Search query cannot be empty");
+            setSearchResults([]);
+            setSearchTotalCount(0);
+            setIsSearching(false);
             return;
         }
 
         setIsSearching(true);
         try {
-            console.log('[Search] Searching for:', query);
             const response = await searchPosts(query, 50, 0);
-            console.log('[Search] Response:', response);
+
+            // Ignore stale responses from older requests
+            if (latestSearchRequestRef.current !== requestId) return;
+
             setSearchResults(response.results);
             setSearchTotalCount(response.total_count || 0);
         } catch (err) {
+            if (latestSearchRequestRef.current !== requestId) return;
+
             console.error("[Search] Search failed:", err);
-            const errorMessage = err instanceof Error ? err.message : "Unknown error";
-            alert(`Search failed: ${errorMessage}`);
+            setSearchResults([]);
+            setSearchTotalCount(0);
         } finally {
-            setIsSearching(false);
+            if (latestSearchRequestRef.current === requestId) {
+                setIsSearching(false);
+            }
         }
     };
+
+    const handleSearch = async () => {
+        await runSearch(searchQuery);
+    };
+
+    useEffect(() => {
+        if (!searchMode) return;
+
+        if (searchDebounceRef.current) {
+            window.clearTimeout(searchDebounceRef.current);
+        }
+
+        searchDebounceRef.current = window.setTimeout(() => {
+            runSearch(searchQuery);
+        }, 250);
+
+        return () => {
+            if (searchDebounceRef.current) {
+                window.clearTimeout(searchDebounceRef.current);
+                searchDebounceRef.current = null;
+            }
+        };
+    }, [searchQuery, searchMode]);
 
     const handleSearchKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter') {

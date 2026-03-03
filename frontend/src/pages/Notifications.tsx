@@ -25,8 +25,14 @@ export default function NotificationsPage() {
   const handleNotificationClick = (notification: {
     id: string;
     type?: "message" | "trust" | "post" | "system";
+    route?: string;
   }) => {
     markAsRead(notification.id);
+
+    if (notification.route) {
+      navigate(notification.route);
+      return;
+    }
 
     switch (notification.type) {
       case "message":

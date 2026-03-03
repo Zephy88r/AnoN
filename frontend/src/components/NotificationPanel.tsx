@@ -43,8 +43,18 @@ export default function NotificationPanel({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  const handleNotificationClick = (notification: any) => {
+  const handleNotificationClick = (notification: {
+    id: string;
+    type?: "message" | "trust" | "post" | "system";
+    route?: string;
+  }) => {
     markAsRead(notification.id);
+
+    if (notification.route) {
+      navigate(notification.route);
+      onClose();
+      return;
+    }
     
     // Navigate based on notification type
     // You can extend this with different notification types and routes
