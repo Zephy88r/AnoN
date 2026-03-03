@@ -81,8 +81,16 @@ export default function Admin() {
     const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
     // Filter states
+    const [sessionsFilter, setSessionsFilter] = useState("");
+    const [sessionsExpiryFilter, setSessionsExpiryFilter] = useState<"all" | "active" | "expiring" | "expired">("all");
+    const [sessionsSort, setSessionsSort] = useState<"expires-soon" | "newest" | "oldest">("expires-soon");
     const [feedFilter, setFeedFilter] = useState("");
+    const [feedDateFilter, setFeedDateFilter] = useState<"all" | "24h" | "7d" | "30d">("all");
+    const [feedSort, setFeedSort] = useState<"newest" | "oldest" | "longest">("newest");
     const [usersFilter, setUsersFilter] = useState("");
+    const [usersBanFilter, setUsersBanFilter] = useState<"all" | "active" | "banned">("all");
+    const [usersActivityFilter, setUsersActivityFilter] = useState<"all" | "reported" | "high-posters" | "new">("all");
+    const [usersSort, setUsersSort] = useState<"most-posts" | "most-reported" | "newest" | "oldest">("most-posts");
     const [abuseFilter, setAbuseFilter] = useState("");
     const [abuseReportedFilter, setAbuseReportedFilter] = useState<"all" | "reported" | "not-reported">("all");
     const [auditFilter, setAuditFilter] = useState("");
@@ -274,12 +282,21 @@ export default function Admin() {
         });
     };
 
-    const handleSelectAllSessions = (isSelected: boolean) => {
+    const handleSelectAllSessions = (isSelected: boolean, visibleSessions: AdminSession[]) => {
         if (isSelected) {
-            const allTokens = new Set(sessions.map((s) => s.token));
-            setSelectedSessions(allTokens);
+            const visibleTokens = visibleSessions.map((s) => s.token);
+            setSelectedSessions((prev) => {
+                const next = new Set(prev);
+                visibleTokens.forEach((token) => next.add(token));
+                return next;
+            });
         } else {
-            setSelectedSessions(new Set());
+            const visibleTokens = new Set(visibleSessions.map((s) => s.token));
+            setSelectedSessions((prev) => {
+                const next = new Set(prev);
+                visibleTokens.forEach((token) => next.delete(token));
+                return next;
+            });
         }
     };
 
@@ -728,14 +745,132 @@ export default function Admin() {
         </div>
     );
 
-    const renderSessions = () => (
+    const renderSessions = () => {
+        const now = Date.now();
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        const hasSessionFilterChanges =
+            sessionsFilter.trim().length > 0 ||
+            sessionsExpiryFilter !== "all" ||
+            sessionsSort !== "expires-soon";
+        const activeSessionFilterCount =
+            (sessionsFilter.trim().length > 0 ? 1 : 0) +
+            (sessionsExpiryFilter !== "all" ? 1 : 0) +
+            (sessionsSort !== "expires-soon" ? 1 : 0);
+
+        const filteredSessions = sessions
+            .filter((session) => {
+                const searchTerm = sessionsFilter.trim().toLowerCase();
+                if (searchTerm) {
+                    const matchesSearch =
+                        session.anon_id.toLowerCase().includes(searchTerm) ||
+                        session.token.toLowerCase().includes(searchTerm);
+                    if (!matchesSearch) return false;
+                }
+
+                const expiresAtMs = Date.parse(session.expires_at);
+                if (Number.isNaN(expiresAtMs)) {
+                    return sessionsExpiryFilter === "all";
+                }
+
+                if (sessionsExpiryFilter === "active" && expiresAtMs <= now) return false;
+                if (sessionsExpiryFilter === "expiring" && (expiresAtMs <= now || expiresAtMs > now + oneDayMs)) return false;
+                if (sessionsExpiryFilter === "expired" && expiresAtMs > now) return false;
+
+                return true;
+            })
+            .sort((a, b) => {
+                const createdA = Date.parse(a.created_at);
+                const createdB = Date.parse(b.created_at);
+                const expiresA = Date.parse(a.expires_at);
+                const expiresB = Date.parse(b.expires_at);
+
+                if (sessionsSort === "newest") {
+                    return (Number.isNaN(createdB) ? 0 : createdB) - (Number.isNaN(createdA) ? 0 : createdA);
+                }
+
+                if (sessionsSort === "oldest") {
+                    return (Number.isNaN(createdA) ? 0 : createdA) - (Number.isNaN(createdB) ? 0 : createdB);
+                }
+
+                return (Number.isNaN(expiresA) ? Number.MAX_SAFE_INTEGER : expiresA) - (Number.isNaN(expiresB) ? Number.MAX_SAFE_INTEGER : expiresB);
+            });
+
+        return (
         <div className="space-y-6">
             <div>
                 <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">Sessions</h1>
                 <p className="text-sm text-slate-700 dark:text-green-300/70">
-                    Active user sessions overview • {sessions.length} active
+                    Active user sessions overview • {filteredSessions.length} shown of {sessions.length}
                     {selectedSessions.size > 0 && ` • ${selectedSessions.size} selected`}
                 </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_190px_190px_auto] gap-3">
+                <div className="relative">
+                    <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 dark:text-green-400/70" />
+                    <input
+                        type="text"
+                        placeholder="Search by Anon ID or session token..."
+                        value={sessionsFilter}
+                        onChange={(e) => setSessionsFilter(e.target.value)}
+                        className="w-full pl-10 pr-10 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20
+                            bg-white/50 dark:bg-black/30 backdrop-blur
+                            text-slate-900 dark:text-green-100 placeholder:text-slate-500 dark:placeholder:text-green-400/50
+                            focus:outline-none focus:ring-2 focus:ring-emerald-500/50 dark:focus:ring-green-500/50
+                            transition-all"
+                    />
+                    {sessionsFilter && (
+                        <button
+                            type="button"
+                            onClick={() => setSessionsFilter("")}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg
+                                text-slate-400 dark:text-green-400/70 hover:text-slate-600 dark:hover:text-green-300
+                                hover:bg-slate-100 dark:hover:bg-green-500/10 transition-colors"
+                        >
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
+                    )}
+                </div>
+
+                <select
+                    value={sessionsExpiryFilter}
+                    onChange={(e) => setSessionsExpiryFilter(e.target.value as "all" | "active" | "expiring" | "expired")}
+                    className="px-3 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20 bg-white/50 dark:bg-black/30 text-slate-900 dark:text-green-100"
+                >
+                    <option value="all">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="expiring">Expiring 24h</option>
+                    <option value="expired">Expired</option>
+                </select>
+
+                <select
+                    value={sessionsSort}
+                    onChange={(e) => setSessionsSort(e.target.value as "expires-soon" | "newest" | "oldest")}
+                    className="px-3 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20 bg-white/50 dark:bg-black/30 text-slate-900 dark:text-green-100"
+                >
+                    <option value="expires-soon">Sort: Expiry Soon</option>
+                    <option value="newest">Sort: Newest</option>
+                    <option value="oldest">Sort: Oldest</option>
+                </select>
+
+                {hasSessionFilterChanges && (
+                    <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-mono border border-emerald-500/25 dark:border-green-500/30 bg-emerald-500/10 dark:bg-green-500/10 text-emerald-700 dark:text-green-300">
+                            {activeSessionFilterCount} active
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSessionsFilter("");
+                                setSessionsExpiryFilter("all");
+                                setSessionsSort("expires-soon");
+                            }}
+                            className="px-4 py-3 rounded-xl border border-slate-300 dark:border-green-500/30 text-sm text-slate-700 dark:text-green-300 hover:bg-slate-50 dark:hover:bg-green-500/10 transition-colors"
+                        >
+                            Reset Filters
+                        </button>
+                    </div>
+                )}
             </div>
 
             {selectedSessions.size > 0 && (
@@ -809,17 +944,18 @@ export default function Admin() {
                             ),
                         },
                     ]}
-                    data={sessions}
+                    data={filteredSessions}
                     keyExtractor={(s) => s.token}
-                    emptyMessage="No sessions recorded"
+                    emptyMessage={sessionsFilter || sessionsExpiryFilter !== "all" ? "No sessions match current filters" : "No sessions recorded"}
                     selectable={true}
                     selectedItems={selectedSessions}
                     onSelectItem={handleSelectSession}
-                    onSelectAll={handleSelectAllSessions}
+                    onSelectAll={(isSelected) => handleSelectAllSessions(isSelected, filteredSessions)}
                 />
             </Panel>
         </div>
-    );
+        );
+    };
 
     const renderTrust = () => (
         <div className="space-y-6">
@@ -888,15 +1024,55 @@ export default function Admin() {
     );
 
     const renderFeed = () => {
-        const filteredPosts = posts.filter((post) => {
-            if (!feedFilter.trim()) return true;
-            const searchTerm = feedFilter.toLowerCase();
-            return (
-                post.text.toLowerCase().includes(searchTerm) ||
-                post.anon_id.toLowerCase().includes(searchTerm) ||
-                post.id.toLowerCase().includes(searchTerm)
-            );
-        });
+        const now = Date.now();
+        const thresholdByWindow: Record<"24h" | "7d" | "30d", number> = {
+            "24h": now - 24 * 60 * 60 * 1000,
+            "7d": now - 7 * 24 * 60 * 60 * 1000,
+            "30d": now - 30 * 24 * 60 * 60 * 1000,
+        };
+        const hasFeedFilterChanges =
+            feedFilter.trim().length > 0 ||
+            feedDateFilter !== "all" ||
+            feedSort !== "newest";
+        const activeFeedFilterCount =
+            (feedFilter.trim().length > 0 ? 1 : 0) +
+            (feedDateFilter !== "all" ? 1 : 0) +
+            (feedSort !== "newest" ? 1 : 0);
+
+        const filteredPosts = posts
+            .filter((post) => {
+                const searchTerm = feedFilter.trim().toLowerCase();
+                if (searchTerm) {
+                    const matchesSearch =
+                        post.text.toLowerCase().includes(searchTerm) ||
+                        post.anon_id.toLowerCase().includes(searchTerm) ||
+                        post.id.toLowerCase().includes(searchTerm);
+                    if (!matchesSearch) return false;
+                }
+
+                if (feedDateFilter !== "all") {
+                    const createdAtMs = Date.parse(post.created_at);
+                    if (Number.isNaN(createdAtMs) || createdAtMs < thresholdByWindow[feedDateFilter]) {
+                        return false;
+                    }
+                }
+
+                return true;
+            })
+            .sort((a, b) => {
+                const createdA = Date.parse(a.created_at);
+                const createdB = Date.parse(b.created_at);
+
+                if (feedSort === "oldest") {
+                    return (Number.isNaN(createdA) ? 0 : createdA) - (Number.isNaN(createdB) ? 0 : createdB);
+                }
+
+                if (feedSort === "longest") {
+                    return b.text.length - a.text.length;
+                }
+
+                return (Number.isNaN(createdB) ? 0 : createdB) - (Number.isNaN(createdA) ? 0 : createdA);
+            });
 
         return (
         <div className="space-y-6">
@@ -907,8 +1083,7 @@ export default function Admin() {
                 </p>
             </div>
 
-            {/* Search Bar */}
-            <div className="relative">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_190px_auto] gap-3">
                 <div className="relative">
                     <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 dark:text-green-400/70" />
                     <input
@@ -934,12 +1109,50 @@ export default function Admin() {
                         </button>
                     )}
                 </div>
-                {feedFilter && (
+                <select
+                    value={feedDateFilter}
+                    onChange={(e) => setFeedDateFilter(e.target.value as "all" | "24h" | "7d" | "30d")}
+                    className="px-3 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20 bg-white/50 dark:bg-black/30 text-slate-900 dark:text-green-100"
+                >
+                    <option value="all">All Time</option>
+                    <option value="24h">Last 24h</option>
+                    <option value="7d">Last 7 days</option>
+                    <option value="30d">Last 30 days</option>
+                </select>
+                <select
+                    value={feedSort}
+                    onChange={(e) => setFeedSort(e.target.value as "newest" | "oldest" | "longest")}
+                    className="px-3 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20 bg-white/50 dark:bg-black/30 text-slate-900 dark:text-green-100"
+                >
+                    <option value="newest">Sort: Newest</option>
+                    <option value="oldest">Sort: Oldest</option>
+                    <option value="longest">Sort: Longest Text</option>
+                </select>
+
+                {hasFeedFilterChanges && (
+                    <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-mono border border-emerald-500/25 dark:border-green-500/30 bg-emerald-500/10 dark:bg-green-500/10 text-emerald-700 dark:text-green-300">
+                            {activeFeedFilterCount} active
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setFeedFilter("");
+                                setFeedDateFilter("all");
+                                setFeedSort("newest");
+                            }}
+                            className="px-4 py-3 rounded-xl border border-slate-300 dark:border-green-500/30 text-sm text-slate-700 dark:text-green-300 hover:bg-slate-50 dark:hover:bg-green-500/10 transition-colors"
+                        >
+                            Reset Filters
+                        </button>
+                    </div>
+                )}
+            </div>
+            {(feedFilter || feedDateFilter !== "all") && (
                     <p className="mt-2 text-sm text-slate-600 dark:text-green-300/70">
                         Found {filteredPosts.length} of {posts.length} posts
                     </p>
                 )}
-            </div>
 
             <Panel>
                 <DataTable
@@ -984,7 +1197,7 @@ export default function Admin() {
                     ]}
                     data={filteredPosts}
                     keyExtractor={(p) => p.id}
-                    emptyMessage={feedFilter ? "No posts match your search" : "No posts found"}
+                    emptyMessage={feedFilter || feedDateFilter !== "all" ? "No posts match current filters" : "No posts found"}
                 />
             </Panel>
         </div>
@@ -1328,16 +1541,62 @@ export default function Admin() {
     };
 
     const renderUsers = () => {
-        const filteredUsers = users.filter((user) => {
-            if (!usersFilter.trim()) return true;
-            const searchTerm = usersFilter.toLowerCase();
-            return (
-                user.anon_id.toLowerCase().includes(searchTerm) ||
-                user.username.toLowerCase().includes(searchTerm) ||
-                user.post_count.toString().includes(searchTerm) ||
-                user.reported_posts.toString().includes(searchTerm)
-            );
-        });
+        const now = Date.now();
+        const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+        const hasUsersFilterChanges =
+            usersFilter.trim().length > 0 ||
+            usersBanFilter !== "all" ||
+            usersActivityFilter !== "all" ||
+            usersSort !== "most-posts";
+        const activeUsersFilterCount =
+            (usersFilter.trim().length > 0 ? 1 : 0) +
+            (usersBanFilter !== "all" ? 1 : 0) +
+            (usersActivityFilter !== "all" ? 1 : 0) +
+            (usersSort !== "most-posts" ? 1 : 0);
+
+        const filteredUsers = users
+            .filter((user) => {
+                const searchTerm = usersFilter.trim().toLowerCase();
+                if (searchTerm) {
+                    const matchesSearch =
+                        user.anon_id.toLowerCase().includes(searchTerm) ||
+                        user.username.toLowerCase().includes(searchTerm) ||
+                        user.post_count.toString().includes(searchTerm) ||
+                        user.reported_posts.toString().includes(searchTerm);
+                    if (!matchesSearch) return false;
+                }
+
+                if (usersBanFilter === "active" && user.is_banned) return false;
+                if (usersBanFilter === "banned" && !user.is_banned) return false;
+
+                if (usersActivityFilter === "reported" && user.reported_posts === 0) return false;
+                if (usersActivityFilter === "high-posters" && user.post_count < 10) return false;
+                if (usersActivityFilter === "new") {
+                    const createdAtMs = Date.parse(user.created_at);
+                    if (Number.isNaN(createdAtMs) || createdAtMs < sevenDaysAgo) return false;
+                }
+
+                return true;
+            })
+            .sort((a, b) => {
+                if (usersSort === "most-reported") {
+                    return b.reported_posts - a.reported_posts;
+                }
+
+                if (usersSort === "newest") {
+                    const createdA = Date.parse(a.created_at);
+                    const createdB = Date.parse(b.created_at);
+                    return (Number.isNaN(createdB) ? 0 : createdB) - (Number.isNaN(createdA) ? 0 : createdA);
+                }
+
+                if (usersSort === "oldest") {
+                    const createdA = Date.parse(a.created_at);
+                    const createdB = Date.parse(b.created_at);
+                    return (Number.isNaN(createdA) ? 0 : createdA) - (Number.isNaN(createdB) ? 0 : createdB);
+                }
+
+                return b.post_count - a.post_count;
+            });
 
         return (
         <div className="space-y-6">
@@ -1348,8 +1607,7 @@ export default function Admin() {
                 </p>
             </div>
 
-            {/* Search Bar */}
-            <div className="relative">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_170px_200px_190px_auto] gap-3">
                 <div className="relative">
                     <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 dark:text-green-400/70" />
                     <input
@@ -1375,12 +1633,61 @@ export default function Admin() {
                         </button>
                     )}
                 </div>
-                {usersFilter && (
+                <select
+                    value={usersBanFilter}
+                    onChange={(e) => setUsersBanFilter(e.target.value as "all" | "active" | "banned")}
+                    className="px-3 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20 bg-white/50 dark:bg-black/30 text-slate-900 dark:text-green-100"
+                >
+                    <option value="all">All Ban States</option>
+                    <option value="active">Not Banned</option>
+                    <option value="banned">Banned</option>
+                </select>
+                <select
+                    value={usersActivityFilter}
+                    onChange={(e) => setUsersActivityFilter(e.target.value as "all" | "reported" | "high-posters" | "new")}
+                    className="px-3 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20 bg-white/50 dark:bg-black/30 text-slate-900 dark:text-green-100"
+                >
+                    <option value="all">All Activity</option>
+                    <option value="reported">With Reports</option>
+                    <option value="high-posters">High Posters (10+)</option>
+                    <option value="new">New (7 days)</option>
+                </select>
+                <select
+                    value={usersSort}
+                    onChange={(e) => setUsersSort(e.target.value as "most-posts" | "most-reported" | "newest" | "oldest")}
+                    className="px-3 py-3 rounded-xl border border-emerald-500/20 dark:border-green-500/20 bg-white/50 dark:bg-black/30 text-slate-900 dark:text-green-100"
+                >
+                    <option value="most-posts">Sort: Most Posts</option>
+                    <option value="most-reported">Sort: Most Reported</option>
+                    <option value="newest">Sort: Newest</option>
+                    <option value="oldest">Sort: Oldest</option>
+                </select>
+
+                {hasUsersFilterChanges && (
+                    <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-mono border border-emerald-500/25 dark:border-green-500/30 bg-emerald-500/10 dark:bg-green-500/10 text-emerald-700 dark:text-green-300">
+                            {activeUsersFilterCount} active
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setUsersFilter("");
+                                setUsersBanFilter("all");
+                                setUsersActivityFilter("all");
+                                setUsersSort("most-posts");
+                            }}
+                            className="px-4 py-3 rounded-xl border border-slate-300 dark:border-green-500/30 text-sm text-slate-700 dark:text-green-300 hover:bg-slate-50 dark:hover:bg-green-500/10 transition-colors"
+                        >
+                            Reset Filters
+                        </button>
+                    </div>
+                )}
+            </div>
+            {(usersFilter || usersBanFilter !== "all" || usersActivityFilter !== "all") && (
                     <p className="mt-2 text-sm text-slate-600 dark:text-green-300/70">
                         Found {filteredUsers.length} of {users.length} users
                     </p>
                 )}
-            </div>
 
             <Panel>
                 <DataTable
@@ -1442,7 +1749,7 @@ export default function Admin() {
                     ]}
                     data={filteredUsers}
                     keyExtractor={(u) => u.anon_id}
-                    emptyMessage={usersFilter ? "No users match your search" : "No users found"}
+                    emptyMessage={usersFilter || usersBanFilter !== "all" || usersActivityFilter !== "all" ? "No users match current filters" : "No users found"}
                 />
             </Panel>
         </div>
