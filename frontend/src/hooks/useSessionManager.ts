@@ -2,6 +2,7 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { refreshSession, isSessionExpired, getTimeUntilExpiry, clearSession } from '../services/session';
 import { ApiError } from '../services/api';
+import { useDialog } from '../contexts/DialogContext';
 
 const REFRESH_BEFORE_EXPIRY = 5 * 60 * 1000; // Refresh 5 minutes before expiry
 const CHECK_INTERVAL = 60 * 1000; // Check every minute
@@ -59,6 +60,7 @@ function getBanMessage(error: unknown): string | null {
 
 export function useSessionManager() {
     const navigate = useNavigate();
+    const { showAlert } = useDialog();
     const intervalRef = useRef<number | null>(null);
     const refreshAttempted = useRef(false);
 
@@ -66,8 +68,8 @@ export function useSessionManager() {
         console.log('[SessionManager] Session expired, logging out...');
         clearSession();
         navigate('/admin', { replace: true });
-        alert('Your session has expired. Please log in again.');
-    }, [navigate]);
+        void showAlert({ title: 'Session Expired', message: 'Your session has expired. Please log in again.', danger: true });
+    }, [navigate, showAlert]);
 
     const handleSessionRefresh = useCallback(async () => {
         if (refreshAttempted.current) return;
@@ -84,13 +86,13 @@ export function useSessionManager() {
             if (banMessage) {
                 clearSession({ keepDeviceKeys: true });
                 navigate('/', { replace: true });
-                alert(banMessage);
+                void showAlert({ title: 'Access Restricted', message: banMessage, danger: true });
                 return;
             }
 
             handleSessionExpired();
         }
-    }, [handleSessionExpired, navigate]);
+    }, [handleSessionExpired, navigate, showAlert]);
 
     const checkSession = useCallback(() => {
         // Check if session is expired

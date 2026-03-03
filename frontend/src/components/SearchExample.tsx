@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { searchPosts } from '../services/postsApi';
 import type { ApiSearchResult } from '../services/postsApi';
+import { useDialog } from '../contexts/DialogContext';
 
 // Helper to display username or fallback
 const displayUsername = (username?: string, anonId?: string): string => {
@@ -11,6 +12,7 @@ const displayUsername = (username?: string, anonId?: string): string => {
 };
 
 export default function SearchExample() {
+  const { showAlert } = useDialog();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ApiSearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -29,7 +31,7 @@ export default function SearchExample() {
       setOffset(0);
     } catch (error) {
       console.error('Search failed:', error);
-      alert('Search failed. Please try again.');
+      await showAlert({ title: 'Search Failed', message: 'Search failed. Please try again.', danger: true });
     } finally {
       setIsLoading(false);
     }

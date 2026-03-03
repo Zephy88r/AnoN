@@ -17,6 +17,7 @@ import SystemHealthPanel from "../components/admin/SystemHealthPanel";
 import ConfirmationModal from "../components/ConfirmationModal";
 import CopyButton from "../components/CopyButton";
 import PostDetailModal from "../components/PostDetailModal";
+import { useDialog } from "../contexts/DialogContext";
 import { formatAdminTime } from "../utils/formatTime";
 import {
     banAdminUser,
@@ -65,6 +66,7 @@ const BAN_DURATION_OPTIONS = [
 
 export default function Admin() {
     const navigate = useNavigate();
+    const { showConfirm } = useDialog();
     const [hasSession, setHasSession] = useState(() => Boolean(getAdminToken()));
     const [currentPage, setCurrentPage] = useState<AdminPage>("dashboard");
 
@@ -189,7 +191,16 @@ export default function Admin() {
     };
 
     const handleDeletePost = async (postId: string, confirmFirst: boolean = true) => {
-        if (confirmFirst && !confirm("Delete this post? This action is logged.")) return;
+        if (confirmFirst) {
+            const confirmed = await showConfirm({
+                title: "Delete Post",
+                message: "Delete this post? This action is logged.",
+                confirmText: "Delete",
+                cancelText: "Cancel",
+                danger: true,
+            });
+            if (!confirmed) return;
+        }
         try {
             await deleteAdminPost(postId);
             setPosts((prev) => prev.filter((p) => p.id !== postId));

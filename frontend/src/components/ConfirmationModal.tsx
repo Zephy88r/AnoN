@@ -10,6 +10,7 @@ type ConfirmationModalProps = {
     confirmText?: string;
     cancelText?: string;
     danger?: boolean;
+    hideCancel?: boolean;
 };
 
 export default function ConfirmationModal({
@@ -21,6 +22,7 @@ export default function ConfirmationModal({
     confirmText = "Confirm",
     cancelText = "Cancel",
     danger = false,
+    hideCancel = false,
 }: ConfirmationModalProps) {
     const [mounted, setMounted] = useState(false);
     const [enter, setEnter] = useState(false);
@@ -138,20 +140,22 @@ export default function ConfirmationModal({
 
                 {/* Footer */}
                 <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-green-300/10">
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        disabled={loading}
-                        className="rounded-xl px-4 py-2 text-sm font-mono
-                            border border-slate-300 dark:border-green-500/30
-                            bg-white dark:bg-black/50
-                            text-slate-700 dark:text-green-300
-                            hover:bg-slate-50 dark:hover:bg-green-500/10
-                            disabled:opacity-75 disabled:cursor-not-allowed
-                            transition-colors"
-                    >
-                        {cancelText}
-                    </button>
+                    {!hideCancel && (
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            disabled={loading}
+                            className="rounded-xl px-4 py-2 text-sm font-mono
+                                border border-slate-300 dark:border-green-500/30
+                                bg-white dark:bg-black/50
+                                text-slate-700 dark:text-green-300
+                                hover:bg-slate-50 dark:hover:bg-green-500/10
+                                disabled:opacity-75 disabled:cursor-not-allowed
+                                transition-colors"
+                        >
+                            {cancelText}
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={handleConfirm}

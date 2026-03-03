@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import TrustRequestModal from "../components/TrustRequestModal";
 import { useTrust } from "../contexts/TrustContext";
+import { useDialog } from "../contexts/DialogContext";
 import { ensureThreadForPeer } from "../services/thread";
 import { createPost, fetchFeed, deletePost, likePost, dislikePost, getRemainingPosts, createComment, getComments, deleteComment, likeComment, dislikeComment, createCommentReply, getCommentReplies, deleteCommentReply, likeCommentReply, dislikeCommentReply, searchPosts, reportPost } from "../services/postsApi";
 import type { ApiPost, ApiComment, ApiCommentReply, ApiSearchResult } from "../services/postsApi";
@@ -24,6 +25,7 @@ const REPORT_REASON_OPTIONS = [
 export default function HomeFeed() {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
+    const { showAlert, showConfirm } = useDialog();
 
     const [hoveredReplyId, setHoveredReplyId] = useState<number | null>(null);
     const [posts, setPosts] = useState<ApiPost[]>([]);
@@ -116,17 +118,17 @@ export default function HomeFeed() {
         const trimmedText = postText.trim();
         
         if (!trimmedText) {
-            alert("Post cannot be empty");
+            await showAlert({ title: "Validation Error", message: "Post cannot be empty." });
             return;
         }
 
         if (trimmedText.length > 280) {
-            alert("Post exceeds 280 characters");
+            await showAlert({ title: "Validation Error", message: "Post exceeds 280 characters." });
             return;
         }
 
         if (postsLeftToday <= 0) {
-            alert("Daily post limit reached");
+            await showAlert({ title: "Posting Limit", message: "Daily post limit reached." });
             return;
         }
 
@@ -142,7 +144,7 @@ export default function HomeFeed() {
         } catch (err) {
             console.error("Post creation failed:", err);
             const errorMessage = err instanceof Error ? err.message : "Error creating post";
-            alert(errorMessage);
+            await showAlert({ title: "Post Failed", message: errorMessage, danger: true });
         } finally {
             setIsSubmitting(false);
         }
@@ -167,7 +169,15 @@ export default function HomeFeed() {
     };
 
     const handleDeletePost = async (postId: string) => {
-        if (!confirm("Are you sure you want to delete this post?")) {
+        const confirmed = await showConfirm({
+            title: "Delete post",
+            message: "Are you sure you want to delete this post?",
+            confirmText: "Delete",
+            cancelText: "Cancel",
+            danger: true,
+        });
+
+        if (!confirmed) {
             return;
         }
 
@@ -177,7 +187,7 @@ export default function HomeFeed() {
             setPosts(posts.filter(p => p.id !== postId));
         } catch (err) {
             console.error("Failed to delete post:", err);
-            alert("Failed to delete post. You can only delete your own posts.");
+            await showAlert({ title: "Delete Failed", message: "Failed to delete post. You can only delete your own posts.", danger: true });
         }
     };
 
@@ -201,11 +211,11 @@ export default function HomeFeed() {
         setIsSubmittingReport(true);
         try {
             await reportPost(reportPostId, reportReason);
-            alert("Post reported successfully");
+            await showAlert({ title: "Success", message: "Post reported successfully." });
             closeReportModal();
         } catch (err) {
             console.error("Failed to report post:", err);
-            alert("Failed to report post. Please try again.");
+            await showAlert({ title: "Report Failed", message: "Failed to report post. Please try again.", danger: true });
         } finally {
             setIsSubmittingReport(false);
         }
@@ -219,7 +229,7 @@ export default function HomeFeed() {
         } catch (err) {
             console.error("Failed to like post:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to like post";
-            alert(errorMessage);
+            await showAlert({ title: "Like Failed", message: errorMessage, danger: true });
         }
     };
 
@@ -231,7 +241,7 @@ export default function HomeFeed() {
         } catch (err) {
             console.error("Failed to dislike post:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to dislike post";
-            alert(errorMessage);
+            await showAlert({ title: "Dislike Failed", message: errorMessage, danger: true });
         }
     };
 
@@ -271,12 +281,20 @@ export default function HomeFeed() {
             setCommentText({ ...commentText, [postId]: "" });
         } catch (err) {
             console.error("Failed to create comment:", err);
-            alert("Failed to create comment");
+            await showAlert({ title: "Comment Failed", message: "Failed to create comment.", danger: true });
         }
     };
 
     const handleDeleteComment = async (postId: string, commentId: string) => {
-        if (!confirm("Are you sure you want to delete this comment?")) {
+        const confirmed = await showConfirm({
+            title: "Delete comment",
+            message: "Are you sure you want to delete this comment?",
+            confirmText: "Delete",
+            cancelText: "Cancel",
+            danger: true,
+        });
+
+        if (!confirmed) {
             return;
         }
 
@@ -289,7 +307,7 @@ export default function HomeFeed() {
             });
         } catch (err) {
             console.error("Failed to delete comment:", err);
-            alert("Failed to delete comment. You can only delete your own comments.");
+            await showAlert({ title: "Delete Failed", message: "Failed to delete comment. You can only delete your own comments.", danger: true });
         }
     };
 
@@ -303,7 +321,7 @@ export default function HomeFeed() {
         } catch (err) {
             console.error("Failed to like comment:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to like comment";
-            alert(errorMessage);
+            await showAlert({ title: "Like Failed", message: errorMessage, danger: true });
         }
     };
 
@@ -317,7 +335,7 @@ export default function HomeFeed() {
         } catch (err) {
             console.error("Failed to dislike comment:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to dislike comment";
-            alert(errorMessage);
+            await showAlert({ title: "Dislike Failed", message: errorMessage, danger: true });
         }
     };
 
@@ -364,12 +382,20 @@ export default function HomeFeed() {
         } catch (err) {
             console.error("Failed to create reply:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to create reply";
-            alert(errorMessage);
+            await showAlert({ title: "Reply Failed", message: errorMessage, danger: true });
         }
     };
 
     const handleDeleteReply = async (postId: string, commentId: string, replyId: string) => {
-        if (!confirm("Are you sure you want to delete this reply?")) {
+        const confirmed = await showConfirm({
+            title: "Delete reply",
+            message: "Are you sure you want to delete this reply?",
+            confirmText: "Delete",
+            cancelText: "Cancel",
+            danger: true,
+        });
+
+        if (!confirmed) {
             return;
         }
 
@@ -390,7 +416,7 @@ export default function HomeFeed() {
         } catch (err) {
             console.error("Failed to delete reply:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to delete reply";
-            alert(errorMessage);
+            await showAlert({ title: "Delete Failed", message: errorMessage, danger: true });
         }
     };
 
@@ -406,7 +432,7 @@ export default function HomeFeed() {
         } catch (err) {
             console.error("Failed to like reply:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to like reply";
-            alert(errorMessage);
+            await showAlert({ title: "Like Failed", message: errorMessage, danger: true });
         }
     };
 
@@ -422,7 +448,7 @@ export default function HomeFeed() {
         } catch (err) {
             console.error("Failed to dislike reply:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to dislike reply";
-            alert(errorMessage);
+            await showAlert({ title: "Dislike Failed", message: errorMessage, danger: true });
         }
     };
 
