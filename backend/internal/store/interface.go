@@ -18,6 +18,7 @@ type Store interface {
 	// Posts
 	PutPost(p *Post)
 	GetFeed(limit int) []*Post
+	GetTrendingPosts(limit int, offset int) ([]PostWithStats, error)
 	CanCreatePost(anonID string) bool
 	GetRemainingPosts(anonID string) int
 	DeletePostByUser(postID, anonID string) error
@@ -141,6 +142,15 @@ type PostSearchResult struct {
 	RelevanceScore float64
 	MatchedTerms   []string
 	Highlights     string
+}
+
+// PostWithStats represents a feed post with aggregated engagement metrics.
+type PostWithStats struct {
+	Post
+	LikeCount    int
+	DislikeCount int
+	CommentCount int
+	HotScore     float64
 }
 
 var defaultStore Store

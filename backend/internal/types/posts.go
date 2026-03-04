@@ -25,6 +25,18 @@ type PostFeedResponse struct {
 	Posts []PostDTO `json:"posts"`
 }
 
+type TrendingPostDTO struct {
+	PostDTO
+	LikeCount    int     `json:"like_count"`
+	DislikeCount int     `json:"dislike_count"`
+	CommentCount int     `json:"comment_count"`
+	HotScore     float64 `json:"hot_score"`
+}
+
+type TrendingPostsResponse struct {
+	Posts []TrendingPostDTO `json:"posts"`
+}
+
 type PostReactionRequest struct {
 	PostID string `json:"post_id"`
 }

@@ -226,6 +226,11 @@ export default function HomeFeed() {
             const updatedPost = await likePost(postId);
             // Update post in UI
             setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+            setSearchResults(prev => prev.map(result =>
+                result.post.id === postId
+                    ? { ...result, post: { ...result.post, ...updatedPost } }
+                    : result
+            ));
         } catch (err) {
             console.error("Failed to like post:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to like post";
@@ -238,6 +243,11 @@ export default function HomeFeed() {
             const updatedPost = await dislikePost(postId);
             // Update post in UI
             setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+            setSearchResults(prev => prev.map(result =>
+                result.post.id === postId
+                    ? { ...result, post: { ...result.post, ...updatedPost } }
+                    : result
+            ));
         } catch (err) {
             console.error("Failed to dislike post:", err);
             const errorMessage = err instanceof Error ? err.message : "Failed to dislike post";
@@ -523,8 +533,43 @@ export default function HomeFeed() {
             // Ignore stale responses from older requests
             if (latestSearchRequestRef.current !== requestId) return;
 
-            setSearchResults(response.results);
-            setSearchTotalCount(response.total_count || 0);
+            let finalResults = response.results;
+            let finalCount = response.total_count || response.results.length;
+
+            // Fallback: if API returns no results, search within currently loaded feed
+            // (helps username searches when backend relevance filtering misses)
+            if (finalResults.length === 0) {
+                const q = query.toLowerCase();
+                const localMatches: ApiSearchResult[] = posts
+                    .filter((post) => {
+                        const username = displayUsername(post.username, post.anon_id).toLowerCase();
+                        const text = (post.text || "").toLowerCase();
+                        const anonId = (post.anon_id || "").toLowerCase();
+                        return username.includes(q) || text.includes(q) || anonId.includes(q);
+                    })
+                    .map((post) => {
+                        const username = displayUsername(post.username, post.anon_id).toLowerCase();
+                        const isExactUsername = username === q;
+                        const isPrefixUsername = username.startsWith(q);
+
+                        let score = 2;
+                        if (isExactUsername) score = 10;
+                        else if (isPrefixUsername) score = 6;
+
+                        return {
+                            post,
+                            relevance_score: score,
+                            matched_terms: [query],
+                            highlights: post.text,
+                        };
+                    });
+
+                finalResults = localMatches;
+                finalCount = localMatches.length;
+            }
+
+            setSearchResults(finalResults);
+            setSearchTotalCount(finalCount);
         } catch (err) {
             if (latestSearchRequestRef.current !== requestId) return;
 
@@ -729,52 +774,152 @@ export default function HomeFeed() {
                                     </div>
                                 )}
 
-                                {/* Like/Dislike Section */}
-                                <div className="mt-3 flex items-center gap-4 text-sm pt-2 border-t border-slate-200 dark:border-green-300/10">
-                                    {/* Like Button */}
-                                    <button
-                                        type="button"
-                                        onClick={() => handleLikePost(post.id)}
-                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
-                                            post.user_reaction === "like"
-                                                ? "bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold"
-                                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
-                                        }`}
-                                    >
-                                        <svg
-                                            className="w-5 h-5"
-                                            fill={post.user_reaction === "like" ? "currentColor" : "none"}
-                                            stroke="currentColor"
-                                            strokeWidth={post.user_reaction === "like" ? "0" : "2"}
-                                            viewBox="0 0 24 24"
+                                {/* Like/Dislike + Actions Section */}
+                                <div className="mt-3 flex items-center justify-between gap-4 text-sm pt-2 border-t border-slate-200 dark:border-green-300/10">
+                                    <div className="flex items-center gap-4">
+                                        {/* Like Button */}
+                                        <button
+                                            type="button"
+                                            onClick={() => handleLikePost(post.id)}
+                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+                                                post.user_reaction === "like"
+                                                    ? "bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold"
+                                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                            }`}
                                         >
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-                                        </svg>
-                                        <span className="font-mono">{post.likes}</span>
-                                    </button>
+                                            <svg
+                                                className="w-5 h-5"
+                                                fill={post.user_reaction === "like" ? "currentColor" : "none"}
+                                                stroke="currentColor"
+                                                strokeWidth={post.user_reaction === "like" ? "0" : "2"}
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                                            </svg>
+                                            <span className="font-mono">{post.likes}</span>
+                                        </button>
 
-                                    {/* Dislike Button */}
+                                        {/* Dislike Button */}
+                                        <button
+                                            type="button"
+                                            onClick={() => handleDislikePost(post.id)}
+                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+                                                post.user_reaction === "dislike"
+                                                    ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-semibold"
+                                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                            }`}
+                                        >
+                                            <svg
+                                                className="w-5 h-5"
+                                                fill={post.user_reaction === "dislike" ? "currentColor" : "none"}
+                                                stroke="currentColor"
+                                                strokeWidth={post.user_reaction === "dislike" ? "0" : "2"}
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
+                                            </svg>
+                                            <span className="font-mono">{Math.max(0, post.dislikes)}</span>
+                                        </button>
+                                    </div>
+
+                                    <div className="flex items-center gap-3">
+                                        <div
+                                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 font-mono text-xs cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                                            onClick={() => toggleComments(post.id)}
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                                            </svg>
+                                            <span>{
+                                                (comments[post.id]?.length || 0) +
+                                                (comments[post.id]?.reduce((sum, c) => sum + (c.replies_count || 0), 0) || 0)
+                                            }</span>
+                                        </div>
+
+                                        {myAnonId && post.anon_id !== myAnonId && (
+                                            <button
+                                                type="button"
+                                                onClick={() => openReportModal(post.id)}
+                                                className="text-slate-400 dark:text-green-300/50 hover:text-orange-600 dark:hover:text-orange-400 transition"
+                                                title="Report this post"
+                                            >
+                                                🚩
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Comment Toggle Button */}
+                                <div className="mt-2">
                                     <button
                                         type="button"
-                                        onClick={() => handleDislikePost(post.id)}
-                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
-                                            post.user_reaction === "dislike"
-                                                ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-semibold"
-                                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
-                                        }`}
+                                        onClick={() => toggleComments(post.id)}
+                                        className="text-sm text-slate-500 dark:text-green-300/60 hover:text-slate-700 dark:hover:text-green-300 font-mono transition"
                                     >
-                                        <svg
-                                            className="w-5 h-5"
-                                            fill={post.user_reaction === "dislike" ? "currentColor" : "none"}
-                                            stroke="currentColor"
-                                            strokeWidth={post.user_reaction === "dislike" ? "0" : "2"}
-                                            viewBox="0 0 24 24"
-                                        >
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
-                                        </svg>
-                                        <span className="font-mono">{Math.max(0, post.dislikes)}</span>
+                                        {showComments[post.id] ? '▼ Hide comments' : '▶ Show comments'}
                                     </button>
                                 </div>
+
+                                {/* Comments Section */}
+                                {showComments[post.id] && (
+                                    <div className="mt-3 border-t border-slate-200 dark:border-green-300/20 pt-3">
+                                        <div className="flex gap-2 mb-3">
+                                            <input
+                                                type="text"
+                                                value={commentText[post.id] || ""}
+                                                onChange={(e) => setCommentText({ ...commentText, [post.id]: e.target.value })}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                                        e.preventDefault();
+                                                        handleSubmitComment(post.id);
+                                                    }
+                                                }}
+                                                placeholder="Write a comment..."
+                                                maxLength={500}
+                                                className="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-green-300/30 bg-white dark:bg-black text-slate-800 dark:text-green-300 placeholder-slate-400 dark:placeholder-green-300/40 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-green-300/50"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSubmitComment(post.id)}
+                                                disabled={!commentText[post.id]?.trim()}
+                                                className="px-4 py-2 text-sm font-mono rounded-lg bg-emerald-500 dark:bg-green-300/10 text-white dark:text-green-300 hover:bg-emerald-600 dark:hover:bg-green-300/20 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                                            >
+                                                Post
+                                            </button>
+                                        </div>
+
+                                        {loadingComments[post.id] ? (
+                                            <div className="text-sm text-slate-400 dark:text-green-300/50 font-mono">Loading comments...</div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {(comments[post.id] || [])
+                                                    .sort((a, b) => {
+                                                        const sortOrder = commentSort[post.id] || 'newest';
+                                                        const dateA = new Date(a.created_at).getTime();
+                                                        const dateB = new Date(b.created_at).getTime();
+                                                        return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
+                                                    })
+                                                    .map((comment) => (
+                                                    <div
+                                                        key={comment.id}
+                                                        className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-green-300/10"
+                                                    >
+                                                        <div className="flex items-start justify-between gap-2">
+                                                            <div className="flex-1">
+                                                                <div className="text-xs font-mono text-slate-500 dark:text-green-300/60 mb-1">
+                                                                    {displayUsername(comment.username, comment.anon_id)} • {timeAgo(comment.created_at)}
+                                                                </div>
+                                                                <div className="text-sm text-slate-800 dark:text-green-300 wrap-break-word">
+                                                                    {renderTextWithMentions(comment.text)}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         );
                     })}

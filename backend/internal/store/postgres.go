@@ -217,6 +217,95 @@ func (s *PgStore) GetFeed(limit int) []*Post {
 	return out
 }
 
+func (s *PgStore) GetTrendingPosts(limit int, offset int) ([]PostWithStats, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `
+		WITH react AS (
+			SELECT
+				post_id,
+				COUNT(*) FILTER (WHERE reaction_type = 'like') AS likes,
+				COUNT(*) FILTER (WHERE reaction_type = 'dislike') AS dislikes
+			FROM post_reactions
+			GROUP BY post_id
+		),
+		com AS (
+			SELECT post_id, COUNT(*) AS comments
+			FROM post_comments
+			WHERE deleted = false
+			GROUP BY post_id
+		)
+		SELECT
+			p.id,
+			p.anon_id,
+			p.text,
+			p.created_at,
+			p.likes,
+			p.dislikes,
+			p.deleted,
+			COALESCE(r.likes, 0) AS like_count,
+			COALESCE(r.dislikes, 0) AS dislike_count,
+			COALESCE(c.comments, 0) AS comment_count,
+			ROUND(
+				LN(GREATEST(ABS(COALESCE(r.likes, 0) - COALESCE(r.dislikes, 0)), 1)) +
+				CASE
+					WHEN (COALESCE(r.likes, 0) - COALESCE(r.dislikes, 0)) > 0 THEN 1
+					WHEN (COALESCE(r.likes, 0) - COALESCE(r.dislikes, 0)) < 0 THEN -1
+					ELSE 0
+				END * (EXTRACT(EPOCH FROM p.created_at) / 45000.0),
+				7
+			)::double precision AS hot_score
+		FROM posts p
+		LEFT JOIN react r ON r.post_id = p.id
+		LEFT JOIN com c ON c.post_id = p.id
+		WHERE p.deleted = false
+		ORDER BY hot_score DESC, p.created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	rows, err := s.db.Query(query, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("query trending posts: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]PostWithStats, 0, limit)
+	for rows.Next() {
+		var post PostWithStats
+		err := rows.Scan(
+			&post.ID,
+			&post.AnonID,
+			&post.Text,
+			&post.CreatedAt,
+			&post.Likes,
+			&post.Dislikes,
+			&post.Deleted,
+			&post.LikeCount,
+			&post.DislikeCount,
+			&post.CommentCount,
+			&post.HotScore,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan trending post: %w", err)
+		}
+		out = append(out, post)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate trending posts: %w", err)
+	}
+
+	return out, nil
+}
+
 func (s *PgStore) CanCreatePost(anonID string) bool {
 	dateKey := time.Now().Format("2006-01-02")
 
@@ -982,45 +1071,69 @@ func (s *PgStore) SearchPosts(query string, hashtags []string, limit int, offset
 	baseQuery := `
 		WITH ranked_posts AS (
 			SELECT 
-				id, anon_id, text, created_at, likes, dislikes, deleted,
-				hashtags,
+				p.id, p.anon_id, p.text, p.created_at, p.likes, p.dislikes, p.deleted,
+				p.hashtags,
 				CASE 
 					-- Strategy 1: Full-text search relevance (highest priority)
 					WHEN $1 != '' THEN 
-						ts_rank(text_search, plainto_tsquery('english', $1)) * 10.0
+						ts_rank(p.text_search, plainto_tsquery('english', $1)) * 10.0
 					ELSE 0
 				END +
 				CASE
-					-- Strategy 2: Exact match bonus
-					WHEN $1 != '' AND LOWER(text) LIKE '%' || LOWER($1) || '%' THEN 5.0
+					-- Strategy 2: Text contains match bonus
+					WHEN $1 != '' AND LOWER(p.text) LIKE '%' || LOWER($1) || '%' THEN 5.0
 					ELSE 0
 				END +
 				CASE
-					-- Strategy 3: Prefix match bonus
-					WHEN $1 != '' AND LOWER(text) LIKE LOWER($1) || '%' THEN 3.0
+					-- Strategy 3: Text prefix match bonus
+					WHEN $1 != '' AND LOWER(p.text) LIKE LOWER($1) || '%' THEN 3.0
 					ELSE 0
 				END +
 				CASE
 					-- Strategy 4: Fuzzy similarity (typo tolerance)
 					WHEN $1 != '' THEN 
-						similarity(LOWER(text), LOWER($1)) * 2.0
+						similarity(LOWER(p.text), LOWER($1)) * 2.0
 					ELSE 0
 				END +
 				CASE
-					-- Strategy 5: Small recency boost (recent posts get slight advantage)
-					WHEN created_at > NOW() - INTERVAL '7 days' THEN 0.5
-					WHEN created_at > NOW() - INTERVAL '30 days' THEN 0.2
+					-- Strategy 5: Exact identity match bonus (username or anon_id)
+					WHEN $1 != '' AND (
+						LOWER(COALESCE(d.username, '')) = LOWER($1)
+						OR LOWER(p.anon_id) = LOWER($1)
+					) THEN 12.0
+					ELSE 0
+				END +
+				CASE
+					-- Strategy 6: Username contains match bonus
+					WHEN $1 != '' AND LOWER(COALESCE(d.username, '')) LIKE '%' || LOWER($1) || '%' THEN 4.0
+					ELSE 0
+				END +
+				CASE
+					-- Strategy 7: Normalized username contains bonus (handles separators)
+					WHEN $1 != '' AND regexp_replace(LOWER(COALESCE(d.username, '')), '[^a-z0-9_]', '', 'g') LIKE '%' || regexp_replace(LOWER($1), '[^a-z0-9_]', '', 'g') || '%' THEN 3.0
+					ELSE 0
+				END +
+				CASE
+					-- Strategy 8: anon_id contains match bonus
+					WHEN $1 != '' AND LOWER(p.anon_id) LIKE '%' || LOWER($1) || '%' THEN 2.0
+					ELSE 0
+				END +
+				CASE
+					-- Strategy 9: Small recency boost (recent posts get slight advantage)
+					WHEN p.created_at > NOW() - INTERVAL '7 days' THEN 0.5
+					WHEN p.created_at > NOW() - INTERVAL '30 days' THEN 0.2
 					ELSE 0
 				END AS relevance_score
-			FROM posts
-			WHERE deleted = false
+			FROM posts p
+			LEFT JOIN devices d ON d.anon_id = p.anon_id
+			WHERE p.deleted = false
 	`
 
 	// Add hashtag filtering if hashtags are provided
 	args := []interface{}{query}
 	argIdx := 2
 	if len(hashtags) > 0 {
-		baseQuery += fmt.Sprintf(" AND hashtags @> $%d", argIdx)
+		baseQuery += fmt.Sprintf(" AND p.hashtags @> $%d", argIdx)
 		args = append(args, hashtags)
 		argIdx++
 	}
@@ -1028,10 +1141,14 @@ func (s *PgStore) SearchPosts(query string, hashtags []string, limit int, offset
 	// Add keyword filter (must match if query is provided)
 	if query != "" {
 		baseQuery += fmt.Sprintf(` AND (
-			text_search @@ plainto_tsquery('english', $%d)
-			OR LOWER(text) LIKE '%%' || LOWER($%d) || '%%'
-			OR similarity(LOWER(text), LOWER($%d)) > 0.1
-		)`, argIdx, argIdx, argIdx)
+			p.text_search @@ plainto_tsquery('english', $%d)
+			OR LOWER(p.text) LIKE '%%' || LOWER($%d) || '%%'
+			OR similarity(LOWER(p.text), LOWER($%d)) > 0.1
+			OR LOWER(COALESCE(d.username, '')) LIKE '%%' || LOWER($%d) || '%%'
+			OR regexp_replace(LOWER(COALESCE(d.username, '')), '[^a-z0-9_]', '', 'g') LIKE '%%' || regexp_replace(LOWER($%d), '[^a-z0-9_]', '', 'g') || '%%'
+			OR LOWER(p.anon_id) = LOWER($%d)
+			OR LOWER(p.anon_id) LIKE '%%' || LOWER($%d) || '%%'
+		)`, argIdx, argIdx, argIdx, argIdx, argIdx, argIdx, argIdx)
 		args = append(args, query)
 		argIdx++
 	}

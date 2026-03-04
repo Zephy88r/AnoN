@@ -2,6 +2,8 @@ package store
 
 import (
 	"fmt"
+	"math"
+	"sort"
 	"sync"
 	"time"
 )
@@ -237,6 +239,89 @@ func (s *MemStore) GetFeed(limit int) []*Post {
 		}
 	}
 	return out
+}
+
+func (s *MemStore) GetTrendingPosts(limit int, offset int) ([]PostWithStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	out := make([]PostWithStats, 0, len(s.posts))
+	for _, p := range s.posts {
+		if p.Deleted {
+			continue
+		}
+
+		commentCount := 0
+		for _, c := range s.postComments[p.ID] {
+			if !c.Deleted {
+				commentCount++
+			}
+		}
+
+		hotScore := computeHotScore(p.Likes, p.Dislikes, p.CreatedAt)
+
+		out = append(out, PostWithStats{
+			Post: Post{
+				ID:        p.ID,
+				AnonID:    p.AnonID,
+				Text:      p.Text,
+				CreatedAt: p.CreatedAt,
+				Likes:     p.Likes,
+				Dislikes:  p.Dislikes,
+				Deleted:   p.Deleted,
+			},
+			LikeCount:    p.Likes,
+			DislikeCount: p.Dislikes,
+			CommentCount: commentCount,
+			HotScore:     hotScore,
+		})
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].HotScore == out[j].HotScore {
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+		return out[i].HotScore > out[j].HotScore
+	})
+
+	if offset >= len(out) {
+		return []PostWithStats{}, nil
+	}
+
+	end := offset + limit
+	if end > len(out) {
+		end = len(out)
+	}
+
+	return out[offset:end], nil
+}
+
+func computeHotScore(up, down int, createdAt time.Time) float64 {
+	s := up - down
+	absS := math.Abs(float64(s))
+	order := math.Log(math.Max(absS, 1))
+
+	sign := 0.0
+	if s > 0 {
+		sign = 1.0
+	} else if s < 0 {
+		sign = -1.0
+	}
+
+	seconds := float64(createdAt.Unix())
+	score := order + sign*(seconds/45000.0)
+
+	return math.Round(score*1e7) / 1e7
 }
 
 // CanCreatePost checks daily post limit (3 per day). Returns false if limit reached.
@@ -1094,6 +1179,7 @@ func (s *MemStore) SearchPosts(query string, hashtags []string, limit int, offse
 
 	// Simple case-insensitive search
 	searchLower := toLower(query)
+	searchNormalized := normalizeSearchToken(query)
 	var results []*PostSearchResult
 
 	for _, p := range s.posts {
@@ -1102,6 +1188,15 @@ func (s *MemStore) SearchPosts(query string, hashtags []string, limit int, offse
 		}
 
 		textLower := toLower(p.Text)
+		anonIDLower := toLower(p.AnonID)
+		usernameLower := ""
+		for _, d := range s.devices {
+			if d.AnonID == p.AnonID {
+				usernameLower = toLower(d.Username)
+				break
+			}
+		}
+		usernameNormalized := normalizeSearchToken(usernameLower)
 		score := 0.0
 
 		// Check hashtag match (if hashtags are provided, must match all)
@@ -1115,17 +1210,31 @@ func (s *MemStore) SearchPosts(query string, hashtags []string, limit int, offse
 
 		// Check keyword match
 		if query != "" {
-			if !contains(textLower, searchLower) {
+			textMatch := contains(textLower, searchLower)
+			usernameMatch := usernameLower != "" && contains(usernameLower, searchLower)
+			anonIDMatch := contains(anonIDLower, searchLower)
+			normalizedUsernameMatch := searchNormalized != "" && usernameNormalized != "" && contains(usernameNormalized, searchNormalized)
+			if !textMatch && !usernameMatch && !anonIDMatch && !normalizedUsernameMatch {
 				continue
 			}
 
 			// Exact match
-			if textLower == searchLower {
+			if textLower == searchLower || usernameLower == searchLower || anonIDLower == searchLower {
 				score += 10.0
-			} else if startsWith(textLower, searchLower) {
+			} else if startsWith(textLower, searchLower) || startsWith(usernameLower, searchLower) {
 				score += 5.0
 			} else {
 				score += 2.0
+			}
+
+			if usernameMatch {
+				score += 1.5
+			}
+			if normalizedUsernameMatch {
+				score += 1.0
+			}
+			if anonIDMatch {
+				score += 1.0
 			}
 		} else if len(hashtags) == 0 {
 			// No query and no hashtags - skip
@@ -1177,6 +1286,16 @@ func toLower(s string) string {
 		}
 	}
 	return string(result)
+}
+
+func normalizeSearchToken(s string) string {
+	runes := make([]rune, 0, len(s))
+	for _, r := range toLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			runes = append(runes, r)
+		}
+	}
+	return string(runes)
 }
 
 func contains(s, substr string) bool {
