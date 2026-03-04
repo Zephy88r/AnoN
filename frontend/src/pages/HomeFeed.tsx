@@ -584,7 +584,7 @@ export default function HomeFeed() {
         <div className="rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-                <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100">
+                <h1 className="text-2xl font-semibold text-slate-950 dark:text-green-100 ">
                 {searchMode ? "Search Network" : "Feed"}
                 </h1>
                 <p className="text-sm text-slate-700 dark:text-green-300/70">

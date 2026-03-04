@@ -18,7 +18,7 @@ export default function NotificationBell({ onToggle }: NotificationBellProps) {
         onToggle();
       }}
       type="button"
-      className={`relative rounded-lg p-1.5 hover:bg-emerald-500/10 dark:hover:bg-green-500/10 ${focusRing} text-slate-700 dark:text-green-400 transition-colors`}
+      className={`relative rounded-lg p-1.5 cursor-pointer hover:bg-emerald-500/10 dark:hover:bg-green-500/10 ${focusRing} text-slate-700 dark:text-green-400 transition-colors`}
       aria-label="Notifications"
       title="Notifications"
     >

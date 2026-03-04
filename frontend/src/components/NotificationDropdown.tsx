@@ -40,11 +40,12 @@ export default function NotificationDropdown({
     navigate("/app/notifications");
     onClose();
   };
+  
 
   return (
     <div
       ref={dropdownRef}
-      className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-black border border-emerald-500/20 dark:border-green-500/20 rounded-lg shadow-2xl dark:shadow-2xl dark:shadow-green-500/30 z-[9999]"
+      className="absolute right-0 top-full mt-2 w-80 rounded-lg border border-emerald-500/20 dark:border-green-500/20 bg-white/95 dark:bg-black/95 backdrop-blur-xl shadow-xl shadow-slate-900/10 dark:shadow-green-500/20 z-9999"
     >
         {/* Header */}
         <div className="px-4 py-3 border-b border-emerald-500/10 dark:border-green-500/10">
@@ -55,7 +56,7 @@ export default function NotificationDropdown({
             <button
               onClick={onClose}
               type="button"
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-green-400 transition-colors"
+              className="cursor-pointer text-slate-500 hover:text-slate-700 dark:text-green-400/70 dark:hover:text-green-300 transition-colors"
               aria-label="Close"
             >
               <XMarkIcon className="h-4 w-4" />
@@ -82,7 +83,7 @@ export default function NotificationDropdown({
               >
                 <div className="flex items-start gap-3">
                   {!notification.isRead && (
-                    <div className="mt-1.5 h-2 w-2 rounded-full bg-green-400 flex-shrink-0" />
+                    <div className="mt-1.5 h-2 w-2 rounded-full bg-green-400 shrink-0" />
                   )}
                   <div className="flex-1 min-w-0">
                     <h4 className="text-sm font-medium text-slate-900 dark:text-green-300 truncate">
@@ -102,11 +103,11 @@ export default function NotificationDropdown({
         </div>
 
         {/* Footer Button */}
-        <div className="px-4 py-3 border-t border-emerald-500/10 dark:border-green-500/10">
+        <div className="px-4 py-3 border-t  border-emerald-500/10 dark:border-green-500/10">
           <button
             onClick={handleShowAll}
             type="button"
-            className="w-full py-2 px-3 text-sm font-medium text-emerald-600 dark:text-green-400 hover:bg-emerald-50 dark:hover:bg-green-500/10 rounded-lg transition-colors"
+            className="w-full py-2 px-3 cursor-pointer text-sm font-medium text-emerald-700 dark:text-green-300 hover:bg-emerald-50 dark:hover:bg-green-500/10 rounded-lg transition-colors"
           >
             Show All Notifications
           </button>

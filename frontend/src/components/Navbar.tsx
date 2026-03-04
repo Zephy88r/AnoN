@@ -46,9 +46,10 @@ export default function Navbar({ onNotificationToggle }: NavbarProps) {
 
 
         {/* Right */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 ">
             {/* Notification Bell */}
             <NotificationBell onToggle={onNotificationToggle} />
+            
 
             <span className="font-mono text-sm text-slate-700 dark:text-green-300">
                 {username}
@@ -58,7 +59,7 @@ export default function Navbar({ onNotificationToggle }: NavbarProps) {
             <div className="flex items-center gap-2 rounded-xl border border-green-500/20 bg-green-500/5 px-2 py-1">
             <button
                 onClick={() => setThemeMode("system")}
-                className={`p-1 rounded-lg hover:bg-green-500/10 ${focusRing} ${
+                className={`p-1 rounded-lg cursor-pointer hover:bg-green-500/10 ${focusRing} ${
                             themeMode === "system"
                         ? "text-slate-900 dark:text-green-300"
                         : "text-slate-700 dark:text-green-300/70"
@@ -71,7 +72,7 @@ export default function Navbar({ onNotificationToggle }: NavbarProps) {
 
             <button
                 onClick={() => setThemeMode("light")}
-                className={`p-1 rounded-lg hover:bg-green-500/10 ${focusRing} ${
+                className={`p-1 rounded-lg cursor-pointer hover:bg-green-500/10 ${focusRing} ${
                             themeMode === "light"
                         ? "text-slate-900 dark:text-green-300"
                         : "text-slate-700 dark:text-green-300/70"
@@ -84,7 +85,7 @@ export default function Navbar({ onNotificationToggle }: NavbarProps) {
 
             <button
                 onClick={() => setThemeMode("dark")}
-                className={`p-1 rounded-lg hover:bg-green-500/10 ${focusRing} ${
+                className={`p-1 rounded-lg cursor-pointer hover:bg-green-500/10 ${focusRing} ${
                             themeMode === "dark"
                         ? "text-slate-900 dark:text-green-300"
                         : "text-slate-700 dark:text-green-300/70"
@@ -98,7 +99,7 @@ export default function Navbar({ onNotificationToggle }: NavbarProps) {
 
             <button
             onClick={() => navigate("/app/settings")}
-                className={`rounded-lg p-1 hover:bg-emerald-500/10 ${focusRing}
+                className={`rounded-lg p-1 cursor-pointer hover:bg-emerald-500/10 ${focusRing}
                             text-slate-700 dark:text-green-400`}
                 aria-label="Settings"
             >
