@@ -111,54 +111,69 @@ type postReportMeta struct {
 }
 
 type MemStore struct {
-	mu             sync.RWMutex
-	cards          map[string]*LinkCard                   // code -> card
-	trust          map[string]*TrustRequest               // id -> trust req
-	posts          []*Post                                // all posts, newest first
-	pings          map[string]*GeoPing                    // anon -> last ping
-	postDays       map[string]map[string]int              // anon -> date (YYYY-MM-DD) -> count
-	auditLogs      []AuditLog                             // all audit logs
-	sessions       map[string]*SessionInfo                // token -> session
-	postReactions  map[string]map[string]*PostReaction    // postID -> anonID -> reaction
-	postComments   map[string][]*PostComment              // postID -> comments
-	commentReacts  map[string]map[string]*CommentReaction // commentID -> anonID -> reaction
-	commentReplies map[string][]*CommentReply             // commentID -> replies
-	replyReacts    map[string]map[string]*ReplyReaction   // replyID -> anonID -> reaction
-	devices        map[string]*Device                     // device_public_id -> device
-	deviceNonces   map[string]map[string]*DeviceNonce     // device_public_id -> nonce -> device nonce
-	users          map[string]*User                       // anon_id -> user
-	postReports    map[string]map[string]postReportMeta   // postID -> reporterAnonID -> report metadata
-	userBans       map[string]*UserBan                    // anonID -> active/latest ban
+	mu                     sync.RWMutex
+	cards                  map[string]*LinkCard                   // code -> card
+	trust                  map[string]*TrustRequest               // id -> trust req
+	posts                  []*Post                                // all posts, newest first
+	pings                  map[string]*GeoPing                    // anon -> last ping
+	postDays               map[string]map[string]int              // anon -> date (YYYY-MM-DD) -> count
+	auditLogs              []AuditLog                             // all audit logs
+	sessions               map[string]*SessionInfo                // token -> session
+	postReactions          map[string]map[string]*PostReaction    // postID -> anonID -> reaction
+	postComments           map[string][]*PostComment              // postID -> comments
+	commentReacts          map[string]map[string]*CommentReaction // commentID -> anonID -> reaction
+	commentReplies         map[string][]*CommentReply             // commentID -> replies
+	replyReacts            map[string]map[string]*ReplyReaction   // replyID -> anonID -> reaction
+	devices                map[string]*Device                     // device_public_id -> device
+	deviceNonces           map[string]map[string]*DeviceNonce     // device_public_id -> nonce -> device nonce
+	users                  map[string]*User                       // anon_id -> user
+	postReports            map[string]map[string]postReportMeta   // postID -> reporterAnonID -> report metadata
+	profileReportsByTarget map[string]map[string]postReportMeta   // target anon -> reporter anon -> report metadata
+	userBans               map[string]*UserBan                    // anonID -> active/latest ban
 }
 
 type User struct {
-	ID          string
-	AnonID      string
-	IsActive    bool
-	LastSeenAt  *time.Time
-	LastLoginAt *time.Time
-	CreatedAt   time.Time
+	ID                 string
+	AnonID             string
+	Username           string
+	UsernameSuffix     string
+	UsernameNormalized string
+	Bio                string
+	Region             string
+	IsRegionPublic     bool
+	TrustScore         int
+	StatusLabel        string
+	ProfileViews       int
+	PostsCount         int
+	CommentsCount      int
+	ReactionsCount     int
+	UsernameChangedAt  *time.Time
+	IsActive           bool
+	LastSeenAt         *time.Time
+	LastLoginAt        *time.Time
+	CreatedAt          time.Time
 }
 
 func NewMemStore() *MemStore {
 	return &MemStore{
-		cards:          make(map[string]*LinkCard),
-		trust:          make(map[string]*TrustRequest),
-		posts:          make([]*Post, 0),
-		pings:          make(map[string]*GeoPing),
-		postDays:       make(map[string]map[string]int),
-		auditLogs:      make([]AuditLog, 0),
-		sessions:       make(map[string]*SessionInfo),
-		postReactions:  make(map[string]map[string]*PostReaction),
-		postComments:   make(map[string][]*PostComment),
-		commentReacts:  make(map[string]map[string]*CommentReaction),
-		commentReplies: make(map[string][]*CommentReply),
-		replyReacts:    make(map[string]map[string]*ReplyReaction),
-		devices:        make(map[string]*Device),
-		deviceNonces:   make(map[string]map[string]*DeviceNonce),
-		users:          make(map[string]*User),
-		postReports:    make(map[string]map[string]postReportMeta),
-		userBans:       make(map[string]*UserBan),
+		cards:                  make(map[string]*LinkCard),
+		trust:                  make(map[string]*TrustRequest),
+		posts:                  make([]*Post, 0),
+		pings:                  make(map[string]*GeoPing),
+		postDays:               make(map[string]map[string]int),
+		auditLogs:              make([]AuditLog, 0),
+		sessions:               make(map[string]*SessionInfo),
+		postReactions:          make(map[string]map[string]*PostReaction),
+		postComments:           make(map[string][]*PostComment),
+		commentReacts:          make(map[string]map[string]*CommentReaction),
+		commentReplies:         make(map[string][]*CommentReply),
+		replyReacts:            make(map[string]map[string]*ReplyReaction),
+		devices:                make(map[string]*Device),
+		deviceNonces:           make(map[string]map[string]*DeviceNonce),
+		users:                  make(map[string]*User),
+		postReports:            make(map[string]map[string]postReportMeta),
+		profileReportsByTarget: make(map[string]map[string]postReportMeta),
+		userBans:               make(map[string]*UserBan),
 	}
 }
 
@@ -871,9 +886,13 @@ func (s *MemStore) EnsureUser(anonID string, now time.Time) error {
 		user.IsActive = true
 		user.LastLoginAt = &now
 		user.LastSeenAt = &now
+		if user.StatusLabel == "" {
+			user.StatusLabel = "Clean"
+		}
 	} else {
 		s.users[anonID] = &User{
 			AnonID:      anonID,
+			StatusLabel: "Clean",
 			IsActive:    true,
 			LastLoginAt: &now,
 			LastSeenAt:  &now,
@@ -1163,6 +1182,27 @@ func (s *MemStore) GetPost(postID string) (*Post, bool) {
 		}
 	}
 	return nil, false
+}
+
+func (s *MemStore) GetPostsByAnonID(anonID string, limit int) []*Post {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 50
+	}
+
+	out := make([]*Post, 0, limit)
+	for _, p := range s.posts {
+		if p.Deleted || p.AnonID != anonID {
+			continue
+		}
+		out = append(out, p)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
 
 // SearchPosts performs basic in-memory search (simplified version for MemStore)

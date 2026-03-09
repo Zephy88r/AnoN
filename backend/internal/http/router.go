@@ -61,6 +61,23 @@ func NewRouter(cfg config.Config) http.Handler {
 		tr.With(SessionAuth(cfg)).Get("/status", handlers.TrustStatus(cfg))
 	})
 
+	// -------- PROFILES --------
+	r.Route("/profiles", func(pr chi.Router) {
+		pr.With(SessionAuth(cfg)).Get("/me", handlers.ProfileMeGet(cfg))
+		pr.With(SessionAuth(cfg)).Patch("/me", handlers.ProfileMePatch(cfg))
+		pr.With(SessionAuth(cfg)).Get("/{anonId}", handlers.ProfileByAnonGet(cfg))
+		pr.With(SessionAuth(cfg)).Get("/{anonId}/posts", handlers.ProfilePostsByAnonGet(cfg))
+	})
+
+	// -------- USERNAME --------
+	r.With(SessionAuth(cfg)).Get("/username/check", handlers.UsernameCheck(cfg))
+
+	// -------- REPORTS --------
+	r.Route("/reports", func(rr chi.Router) {
+		rr.With(SessionAuth(cfg)).Post("/profile", handlers.ReportProfile(cfg))
+		rr.With(SessionAuth(cfg)).Post("/post", handlers.ReportPost(cfg))
+	})
+
 	// -------- WS --------
 	r.With(SessionAuth(cfg)).Post("/ws/ticket", handlers.CreateWSTicket(tickets, trust))
 	r.Get("/ws/chat", handlers.WSChat(hub, tickets, cfg, trust))

@@ -5,6 +5,7 @@ import {
     UserGroupIcon,
     LinkIcon,
     ChatBubbleLeftRightIcon,
+    UserCircleIcon,
     Cog6ToothIcon,
     } from "@heroicons/react/24/outline";
 
@@ -14,6 +15,7 @@ import {
     { name: "Trust", to: "/app/trust", icon: UserGroupIcon },
     { name: "Link Cards", to: "/app/link-cards", icon: LinkIcon },
     { name: "Messages", to: "/app/messages", icon: ChatBubbleLeftRightIcon },
+    { name: "Profile", to: "/app/profile", icon: UserCircleIcon },
     ];
 
     export default function Sidebar() {

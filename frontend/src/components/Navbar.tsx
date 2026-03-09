@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate } from "react-router-dom";
 import {
@@ -7,7 +8,7 @@ import {
     ComputerDesktopIcon,
     } from "@heroicons/react/24/outline";
 import NotificationBell from "./NotificationBell";
-import { getMyUsername } from "../services/session";
+import { getMyUsername, onSessionIdentityUpdated } from "../services/session";
 
 interface NavbarProps {
   onNotificationToggle: () => void;
@@ -17,7 +18,14 @@ export default function Navbar({ onNotificationToggle }: NavbarProps) {
     const { themeMode, setThemeMode } = useTheme();
     const focusRing = "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-green-400 dark:focus-visible:ring-offset-black";
     const navigate = useNavigate();
-    const username = getMyUsername() ?? "ghost";
+    const [username, setUsername] = useState(getMyUsername() ?? "ghost");
+
+    useEffect(() => {
+        setUsername(getMyUsername() ?? "ghost");
+        return onSessionIdentityUpdated(() => {
+            setUsername(getMyUsername() ?? "ghost");
+        });
+    }, []);
 
 
 
@@ -51,9 +59,12 @@ export default function Navbar({ onNotificationToggle }: NavbarProps) {
             <NotificationBell onToggle={onNotificationToggle} />
             
 
-            <span className="font-mono text-sm text-slate-700 dark:text-green-300">
+            <button
+                onClick={() => navigate("/app/profile")}
+                className="font-mono text-sm text-slate-700 transition-colors hover:text-slate-900 dark:text-green-300 dark:hover:text-green-100"
+            >
                 {username}
-            </span>
+            </button>
 
             {/* Theme selector */}
             <div className="flex items-center gap-2 rounded-xl border border-green-500/20 bg-green-500/5 px-2 py-1">

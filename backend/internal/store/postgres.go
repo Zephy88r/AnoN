@@ -217,6 +217,36 @@ func (s *PgStore) GetFeed(limit int) []*Post {
 	return out
 }
 
+func (s *PgStore) GetPostsByAnonID(anonID string, limit int) []*Post {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+		SELECT id, anon_id, text, created_at, likes, dislikes, deleted
+		FROM posts
+		WHERE deleted = false AND anon_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2
+	`
+	rows, err := s.db.Query(query, anonID, limit)
+	if err != nil {
+		fmt.Printf("error querying posts by anon_id: %v\n", err)
+		return []*Post{}
+	}
+	defer rows.Close()
+
+	out := []*Post{}
+	for rows.Next() {
+		p := &Post{}
+		if err := rows.Scan(&p.ID, &p.AnonID, &p.Text, &p.CreatedAt, &p.Likes, &p.Dislikes, &p.Deleted); err != nil {
+			fmt.Printf("error scanning post by anon_id: %v\n", err)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 func (s *PgStore) GetTrendingPosts(limit int, offset int) ([]PostWithStats, error) {
 	if limit <= 0 {
 		limit = 20
@@ -852,12 +882,33 @@ func (s *PgStore) EnforceSessionLimit(anonID string, maxSessions int) error {
 
 func (s *PgStore) EnsureUser(anonID string, now time.Time) error {
 	query := `
-		INSERT INTO users (anon_id, is_active, last_login_at, last_seen_at, created_at)
-		VALUES ($1, true, $2, $2, $2)
+		INSERT INTO users (
+			anon_id,
+			is_active,
+			last_login_at,
+			last_seen_at,
+			created_at,
+			username,
+			username_suffix,
+			username_normalized
+		)
+		VALUES (
+			$1,
+			true,
+			$2,
+			$2,
+			$2,
+			COALESCE((SELECT username FROM devices WHERE anon_id = $1 LIMIT 1), 'ghost_' || substr(md5($1), 1, 8)),
+			COALESCE((SELECT regexp_replace(lower(username), '^ghost_', '') FROM devices WHERE anon_id = $1 LIMIT 1), substr(md5($1), 1, 8)),
+			COALESCE((SELECT lower(username) FROM devices WHERE anon_id = $1 LIMIT 1), lower('ghost_' || substr(md5($1), 1, 8)))
+		)
 		ON CONFLICT (anon_id) DO UPDATE SET
 			is_active = true,
 			last_login_at = $2,
-			last_seen_at = $2
+			last_seen_at = $2,
+			username = COALESCE(NULLIF(users.username, ''), EXCLUDED.username),
+			username_suffix = COALESCE(NULLIF(users.username_suffix, ''), EXCLUDED.username_suffix),
+			username_normalized = COALESCE(NULLIF(users.username_normalized, ''), EXCLUDED.username_normalized)
 	`
 	_, err := s.db.Exec(query, anonID, now)
 	if err != nil {

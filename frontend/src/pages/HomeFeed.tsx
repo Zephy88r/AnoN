@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import TrustRequestModal from "../components/TrustRequestModal";
 import { useTrust } from "../contexts/TrustContext";
 import { useDialog } from "../contexts/DialogContext";
@@ -742,9 +742,12 @@ export default function HomeFeed() {
                             >
                                 {/* Post Header */}
                                 <div className="flex items-center justify-between">
-                                    <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
+                                    <Link
+                                        to={`/app/profile/${post.anon_id}`}
+                                        className="font-mono text-sm text-emerald-700 underline-offset-2 hover:underline dark:text-green-300"
+                                    >
                                         {displayUsername(post.username, post.anon_id)}
-                                    </span>
+                                    </Link>
                                     <div className="flex items-center gap-3">
                                         <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">
                                             {timeAgo(post.created_at)}
@@ -984,9 +987,12 @@ export default function HomeFeed() {
                 className="rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/60 dark:bg-black/50 backdrop-blur p-4"
                 >
                 <div className="flex items-center justify-between mb-2">
-                    <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
+                    <Link
+                    to={`/app/profile/${post.anon_id}`}
+                    className="font-mono text-sm text-emerald-700 underline-offset-2 hover:underline dark:text-green-300"
+                    >
                     {displayUsername(post.username, post.anon_id)}
-                    </span>
+                    </Link>
                     <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">
                     {timeAgo(post.created_at)}
                     </span>

@@ -25,6 +25,7 @@ type Store interface {
 	ReactToPost(postID, anonID, reactionType string) error
 	GetPostReaction(postID, anonID string) (string, bool)
 	GetPost(postID string) (*Post, bool)
+	GetPostsByAnonID(anonID string, limit int) []*Post
 	SearchPosts(query string, hashtags []string, limit int, offset int) ([]*PostSearchResult, int, error)
 
 	// Comments
@@ -91,6 +92,17 @@ type Store interface {
 	ReportPost(postID, reportedAnonID, reporterAnonID, reason string, now time.Time) error
 	GetPostReportCount(postID string) int
 	GetTopReportedPostByAnon(anonID string, threshold int) *PostReport
+
+	// Profiles
+	EnsureProfileForAnon(anonID, region string, now time.Time) error
+	GetProfileByAnonID(anonID string) (*UserProfile, error)
+	UpdateProfile(anonID string, in ProfileUpdateInput, now time.Time) (*UserProfile, error)
+	IsUsernameAvailable(username string, excludeAnonID string) (bool, error)
+	IncrementProfileView(targetAnonID, viewerAnonID string) error
+	GetProfileDeviceInfo(anonID string) (*ProfileDeviceInfo, error)
+	ReportProfile(reporterAnonID, targetUserAnonID, reason string, now time.Time) error
+	ReportPostV2(reporterAnonID, targetUserAnonID, targetPostID, reason string, now time.Time) error
+	GetUserReportCount(targetAnonID string) (int, error)
 }
 
 // Admin types
@@ -134,6 +146,37 @@ type PostReport struct {
 	ReportCount    int
 	LastReportedAt time.Time
 	Reason         string
+}
+
+type UserProfile struct {
+	AnonID             string
+	Username           string
+	UsernameSuffix     string
+	UsernameNormalized string
+	Bio                string
+	Region             string
+	IsRegionPublic     bool
+	CreatedAt          time.Time
+	TrustScore         int
+	StatusLabel        string
+	PostsCount         int
+	CommentsCount      int
+	ReactionsCount     int
+	ProfileViews       int
+	UsernameChangedAt  *time.Time
+}
+
+type ProfileUpdateInput struct {
+	UsernameSuffix *string
+	Bio            *string
+	IsRegionPublic *bool
+}
+
+type ProfileDeviceInfo struct {
+	PrimaryDeviceActive  bool
+	LastActiveAt         *time.Time
+	RecoveryKeyGenerated bool
+	SessionStatus        string
 }
 
 // PostSearchResult represents a post with search relevance information

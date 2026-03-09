@@ -201,6 +201,9 @@ func SessionBootstrap(cfg config.Config) http.HandlerFunc {
 		} else {
 			log.Printf("User ensured: %s (active)", device.AnonID)
 		}
+		if err := store.DefaultStore().EnsureProfileForAnon(device.AnonID, req.Region, now); err != nil {
+			log.Printf("WARNING: ensure profile failed for %s: %v", device.AnonID, err)
+		}
 
 		err = store.DefaultStore().PutSession(store.SessionInfo{
 			ID:             "",
@@ -254,7 +257,11 @@ func SessionMe(cfg config.Config) http.HandlerFunc {
 		}
 
 		username := ""
-		if device, err := store.DefaultStore().GetDeviceByAnonID(claims.AnonID); err == nil {
+		now := time.Now()
+		_ = store.DefaultStore().EnsureProfileForAnon(claims.AnonID, claims.Region, now)
+		if profile, err := store.DefaultStore().GetProfileByAnonID(claims.AnonID); err == nil {
+			username = profile.Username
+		} else if device, err := store.DefaultStore().GetDeviceByAnonID(claims.AnonID); err == nil {
 			username = device.Username
 		}
 
@@ -305,6 +312,9 @@ func SessionRefresh(cfg config.Config) http.HandlerFunc {
 			// Continue anyway to maintain backward compatibility
 		} else {
 			log.Printf("User ensured: %s (active) - refresh", anonID)
+		}
+		if err := store.DefaultStore().EnsureProfileForAnon(anonID, region, now); err != nil {
+			log.Printf("WARNING: ensure profile failed for %s: %v", anonID, err)
 		}
 
 		err = store.DefaultStore().PutSession(store.SessionInfo{

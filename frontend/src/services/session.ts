@@ -12,12 +12,24 @@ const ANON_ID_KEY = "ghost_anon_id";
 const SESSION_EXPIRY_KEY = "ghost_session_expiry";
 const LEGACY_ANON_ID_KEY = "anon_id";
 const LEGACY_SESSION_EXPIRY_KEY = "session_expiry";
+const SESSION_IDENTITY_EVENT = "ghost-session-identity-updated";
 
 const DEFAULT_REGION = "NEPAL";
 const PBKDF2_ITERS = 120000;
 
 // Global session ready flag
 let sessionIsReady = false;
+
+function notifySessionIdentityUpdated(): void {
+    if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event(SESSION_IDENTITY_EVENT));
+    }
+}
+
+function setStoredUsername(username: string): void {
+    storage.setJSON(USERNAME_KEY, username);
+    notifySessionIdentityUpdated();
+}
 
 export function isSessionReady(): boolean {
     return sessionIsReady;
@@ -161,7 +173,7 @@ export async function bootstrapSession(region: string = DEFAULT_REGION): Promise
 
     setSessionToken(res.token);
     storage.setJSON(ANON_ID_KEY, res.anon_id);
-    storage.setJSON(USERNAME_KEY, res.username);
+    setStoredUsername(res.username);
 
     if (res.expires_at) {
         storage.setJSON(SESSION_EXPIRY_KEY, Date.parse(res.expires_at));
@@ -181,7 +193,7 @@ export async function loadSessionMe(): Promise<MeResp> {
     );
 
     storage.setJSON(ANON_ID_KEY, res.anon_id);
-    storage.setJSON(USERNAME_KEY, res.username);
+    setStoredUsername(res.username);
     if (res.expires_at) {
         storage.setJSON(SESSION_EXPIRY_KEY, Date.parse(res.expires_at));
     }
@@ -228,6 +240,18 @@ export function getMyAnonId(): string | null {
 
 export function getMyUsername(): string | null {
     return storage.getJSON<string | null>(USERNAME_KEY, null);
+}
+
+export function setMyUsername(username: string): void {
+    setStoredUsername(username);
+}
+
+export function onSessionIdentityUpdated(listener: () => void): () => void {
+    if (typeof window === "undefined") {
+        return () => {};
+    }
+    window.addEventListener(SESSION_IDENTITY_EVENT, listener);
+    return () => window.removeEventListener(SESSION_IDENTITY_EVENT, listener);
 }
 
 export async function refreshSession(): Promise<void> {

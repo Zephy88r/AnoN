@@ -13,6 +13,7 @@ import Messages from "./pages/Messages";
 import ChatThread from "./pages/ChatThread";
 import Settings from "./pages/Settings";
 import Notifications from "./pages/Notifications";
+import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
 import AdminLogin from "./pages/AdminLogin";
 
@@ -58,7 +59,6 @@ export default function App() {
             <Route path="/" element={<Landing />} />
             <Route path="/admin" element={<AdminLogin />} />
             <Route path="/admin/panel" element={<Admin />} />
-
             <Route path="/app" element={<PageShell />}>
               <Route index element={<Navigate to="feed" replace />} />
               <Route path="feed" element={<HomeFeed />} />
@@ -76,6 +76,8 @@ export default function App() {
               />
               <Route path="settings" element={<Settings />} />
               <Route path="notifications" element={<Notifications />} />
+              <Route path="profile" element={<Profile />} />
+              <Route path="profile/:anonId" element={<Profile />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />

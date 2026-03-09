@@ -1,7 +1,8 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { getAnonDeviceKey } from "../services/geo";
-import { logout, getMyUsername } from "../services/session";
+import { logout, getMyUsername, onSessionIdentityUpdated } from "../services/session";
 
 const card =
     "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-4";
@@ -16,7 +17,14 @@ export default function Settings() {
         .slice(0, 8)
         .toUpperCase();
     
-    const username = getMyUsername();
+    const [username, setUsername] = useState(getMyUsername());
+
+    useEffect(() => {
+        setUsername(getMyUsername());
+        return onSessionIdentityUpdated(() => {
+            setUsername(getMyUsername());
+        });
+    }, []);
 
     return (
         <div className="mx-auto w-full max-w-3xl space-y-6">
