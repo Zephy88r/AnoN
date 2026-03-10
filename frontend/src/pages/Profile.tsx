@@ -1,5 +1,5 @@
-﻿import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+﻿import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { useDialog } from "../contexts/DialogContext";
 import { getMyAnonId, setMyUsername } from "../services/session";
 import {
@@ -75,6 +75,28 @@ function displayUsername(username?: string, anonId?: string): string {
   return username || `User #${anonId?.substring(0, 8) || "unknown"}`;
 }
 
+function toMentionHandle(username?: string, anonId?: string): string {
+  const fallback = anonId ? `user_${anonId.substring(0, 8)}` : "user";
+  const raw = (username || fallback).toLowerCase();
+  const normalized = raw.replace(/[^a-z0-9_]/g, "_").replace(/^_+|_+$/g, "");
+  return normalized || fallback;
+}
+
+type MentionCandidate = {
+  handle: string;
+  label: string;
+  anonId: string;
+};
+
+type ActiveMentionState = {
+  key: string;
+  inputId: string;
+  start: number;
+  end: number;
+  query: string;
+  items: MentionCandidate[];
+};
+
 function validateSuffix(suffixRaw: string): UsernameCheckResult | null {
   const suffix = suffixRaw.trim().toLowerCase();
   if (!suffix || suffix.length < 3) {
@@ -94,6 +116,7 @@ function validateSuffix(suffixRaw: string): UsernameCheckResult | null {
 
 export default function Profile() {
   const { anonId } = useParams();
+  const navigate = useNavigate();
   const { showAlert } = useDialog();
   const myAnonId = getMyAnonId();
   const isOwnProfile = !anonId || anonId === myAnonId;
@@ -121,6 +144,8 @@ export default function Profile() {
   const [showReplies, setShowReplies] = useState<Record<string, boolean>>({});
   const [replyText, setReplyText] = useState<Record<string, string>>({});
   const [loadingReplies, setLoadingReplies] = useState<Record<string, boolean>>({});
+  const [activeMention, setActiveMention] = useState<ActiveMentionState | null>(null);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
 
   const [newPostText, setNewPostText] = useState("");
   const [posting, setPosting] = useState(false);
@@ -419,6 +444,261 @@ export default function Profile() {
     setShowReplies((prev) => ({ ...prev, [commentId]: !visible }));
   }
 
+  function onReplyToUser(commentId: string, username?: string, anonId?: string) {
+    const mention = `@${toMentionHandle(username, anonId)} `;
+    setReplyText((prev) => ({ ...prev, [commentId]: mention }));
+
+    setTimeout(() => {
+      const input = document.getElementById(`profile-reply-input-${commentId}`) as HTMLInputElement | null;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(mention.length, mention.length);
+    }, 100);
+  }
+
+  function registerMentionTarget(map: Record<string, string>, username?: string, targetAnonId?: string) {
+    if (!targetAnonId) return;
+    const shortId = targetAnonId.substring(0, 8).toLowerCase();
+    map[toMentionHandle(username, targetAnonId)] = targetAnonId;
+    map[toMentionHandle(undefined, targetAnonId)] = targetAnonId;
+    map[shortId] = targetAnonId;
+    map[`#${shortId}`] = targetAnonId;
+    map[targetAnonId.toLowerCase()] = targetAnonId;
+  }
+
+  function buildMentionMapForPost(postId: string, postAnonId?: string, postUsername?: string): Record<string, string> {
+    const map: Record<string, string> = {};
+    registerMentionTarget(map, postUsername, postAnonId);
+
+    const postComments = comments[postId] || [];
+    for (const comment of postComments) {
+      registerMentionTarget(map, comment.username, comment.anon_id);
+      const commentReplies = replies[comment.id] || [];
+      for (const reply of commentReplies) {
+        registerMentionTarget(map, reply.username, reply.anon_id);
+      }
+    }
+
+    return map;
+  }
+
+  function buildMentionCandidatesForPost(postId: string, postAnonId?: string, postUsername?: string): MentionCandidate[] {
+    const candidatesByAnon = new Map<string, MentionCandidate>();
+
+    const addCandidate = (username?: string, targetAnonId?: string) => {
+      if (!targetAnonId) return;
+      if (candidatesByAnon.has(targetAnonId)) return;
+      candidatesByAnon.set(targetAnonId, {
+        anonId: targetAnonId,
+        handle: toMentionHandle(username, targetAnonId),
+        label: displayUsername(username, targetAnonId),
+      });
+    };
+
+    addCandidate(postUsername, postAnonId);
+
+    const postComments = comments[postId] || [];
+    for (const comment of postComments) {
+      addCandidate(comment.username, comment.anon_id);
+      const commentReplies = replies[comment.id] || [];
+      for (const reply of commentReplies) {
+        addCandidate(reply.username, reply.anon_id);
+      }
+    }
+
+    return Array.from(candidatesByAnon.values());
+  }
+
+  function getMentionTrigger(text: string, cursor: number) {
+    const left = text.slice(0, cursor);
+    const match = /(^|\s)@(#?[a-zA-Z0-9_-]*)$/.exec(left);
+    if (!match) return null;
+    const start = left.lastIndexOf("@");
+    if (start < 0) return null;
+    return {
+      query: (match[2] || "").toLowerCase(),
+      start,
+      end: cursor,
+    };
+  }
+
+  function updateMentionSuggestions(
+    key: string,
+    inputId: string,
+    text: string,
+    cursor: number,
+    candidates: MentionCandidate[]
+  ) {
+    const trigger = getMentionTrigger(text, cursor);
+    if (!trigger) {
+      if (activeMention?.key === key) setActiveMention(null);
+      return;
+    }
+
+    const normalizedQuery = trigger.query.startsWith("#") ? trigger.query.slice(1) : trigger.query;
+
+    const filtered = candidates
+      .filter((c) => {
+        const shortId = c.anonId.substring(0, 8).toLowerCase();
+        return (
+          c.handle.includes(normalizedQuery) ||
+          c.label.toLowerCase().includes(normalizedQuery) ||
+          c.anonId.toLowerCase().includes(normalizedQuery) ||
+          shortId.includes(normalizedQuery)
+        );
+      })
+      .slice(0, 6);
+
+    if (!filtered.length) {
+      if (activeMention?.key === key) setActiveMention(null);
+      return;
+    }
+
+    setActiveMention({
+      key,
+      inputId,
+      start: trigger.start,
+      end: trigger.end,
+      query: trigger.query,
+      items: filtered,
+    });
+    setActiveMentionIndex(0);
+  }
+
+  function handleCommentInputChange(
+    postId: string,
+    inputId: string,
+    candidates: MentionCandidate[],
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const value = e.target.value;
+    const cursor = e.target.selectionStart ?? value.length;
+    setCommentText((prev) => ({ ...prev, [postId]: value }));
+    updateMentionSuggestions(`comment:${postId}`, inputId, value, cursor, candidates);
+  }
+
+  function handleReplyInputChange(
+    commentId: string,
+    inputId: string,
+    candidates: MentionCandidate[],
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const value = e.target.value;
+    const cursor = e.target.selectionStart ?? value.length;
+    setReplyText((prev) => ({ ...prev, [commentId]: value }));
+    updateMentionSuggestions(`reply:${commentId}`, inputId, value, cursor, candidates);
+  }
+
+  function applyMentionCandidate(candidate: MentionCandidate) {
+    if (!activeMention) return;
+
+    const isIdQuery = activeMention.query.startsWith("#");
+    const mentionHandle = isIdQuery ? `#${candidate.anonId.substring(0, 8).toLowerCase()}` : candidate.handle;
+    const mention = `@${mentionHandle} `;
+    const nextCursor = activeMention.start + mention.length;
+
+    if (activeMention.key.startsWith("comment:")) {
+      const postId = activeMention.key.slice("comment:".length);
+      setCommentText((prev) => {
+        const current = prev[postId] || "";
+        const next = current.slice(0, activeMention.start) + mention + current.slice(activeMention.end);
+        return { ...prev, [postId]: next };
+      });
+    } else if (activeMention.key.startsWith("reply:")) {
+      const commentId = activeMention.key.slice("reply:".length);
+      setReplyText((prev) => {
+        const current = prev[commentId] || "";
+        const next = current.slice(0, activeMention.start) + mention + current.slice(activeMention.end);
+        return { ...prev, [commentId]: next };
+      });
+    }
+
+    const inputId = activeMention.inputId;
+    setActiveMention(null);
+
+    setTimeout(() => {
+      const input = document.getElementById(inputId) as HTMLInputElement | null;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(nextCursor, nextCursor);
+    }, 0);
+  }
+
+  function handleMentionKeyDown(key: string, e: React.KeyboardEvent<HTMLInputElement>): boolean {
+    if (!activeMention || activeMention.key !== key || activeMention.items.length === 0) {
+      return false;
+    }
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveMentionIndex((prev) => (prev + 1) % activeMention.items.length);
+      return true;
+    }
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveMentionIndex((prev) => (prev - 1 + activeMention.items.length) % activeMention.items.length);
+      return true;
+    }
+
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      applyMentionCandidate(activeMention.items[activeMentionIndex] || activeMention.items[0]);
+      return true;
+    }
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setActiveMention(null);
+      return true;
+    }
+
+    return false;
+  }
+
+  function renderTextWithMentions(text: string, mentionMap: Record<string, string>) {
+    const mentionRegex = /@(#?[a-zA-Z0-9_-]+)/g;
+    const parts: ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = mentionRegex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(text.substring(lastIndex, match.index));
+      }
+
+      const handle = match[1].toLowerCase();
+      const targetAnonId = mentionMap[handle];
+
+      if (!targetAnonId) {
+        parts.push(match[0]);
+        lastIndex = match.index + match[0].length;
+        continue;
+      }
+
+      parts.push(
+        <span
+          key={match.index}
+          className="text-blue-600 dark:text-blue-400 font-semibold cursor-pointer hover:underline"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/app/profile/${targetAnonId}`);
+          }}
+        >
+          {match[0]}
+        </span>
+      );
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    if (lastIndex < text.length) {
+      parts.push(text.substring(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : text;
+  }
+
   async function onSubmitReply(postId: string, commentId: string) {
     const text = (replyText[commentId] || "").trim();
     if (!text) return;
@@ -577,7 +857,10 @@ export default function Profile() {
         )}
         <div className="mt-3 space-y-4">
           {posts.length === 0 && <p className="text-sm text-slate-700 dark:text-green-300/80">No posts found.</p>}
-          {posts.map((post) => (
+          {posts.map((post) => {
+            const mentionMap = buildMentionMapForPost(post.id, post.anon_id, profile.username);
+            const mentionCandidates = buildMentionCandidatesForPost(post.id, post.anon_id, profile.username);
+            return (
             <article key={post.id} className="rounded-2xl border border-emerald-500/15 bg-white/60 p-4 backdrop-blur dark:border-green-500/20 dark:bg-black/50">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
@@ -627,11 +910,15 @@ export default function Profile() {
 
               {showComments[post.id] && (
                 <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-green-300/20">
-                  <div className="flex gap-2">
+                  <div className="relative flex gap-2">
                     <input
+                      id={`profile-comment-input-${post.id}`}
                       value={commentText[post.id] || ""}
-                      onChange={(e) => setCommentText((prev) => ({ ...prev, [post.id]: e.target.value }))}
+                      onChange={(e) => handleCommentInputChange(post.id, `profile-comment-input-${post.id}`, mentionCandidates, e)}
                       onKeyDown={(e) => {
+                        if (handleMentionKeyDown(`comment:${post.id}`, e)) {
+                          return;
+                        }
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault();
                           onSubmitComment(post.id);
@@ -640,9 +927,36 @@ export default function Profile() {
                       placeholder="Write a comment..."
                       className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:ring-2 focus:ring-emerald-500 dark:border-green-300/30 dark:bg-black dark:text-green-300 dark:placeholder-green-300/40 dark:focus:ring-green-300/50"
                     />
-                    <button onClick={() => onSubmitComment(post.id)} disabled={!commentText[post.id]?.trim()} className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-mono text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-300/10 dark:text-green-300 dark:hover:bg-green-300/20">
-                      Post
+                    <button
+                      onClick={() => onSubmitComment(post.id)}
+                      disabled={!commentText[post.id]?.trim()}
+                      className="inline-flex items-center justify-center rounded-lg bg-emerald-500 px-3 py-2 text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-300/10 dark:text-green-300 dark:hover:bg-green-300/20"
+                      aria-label="Send comment"
+                      title="Send comment"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h11m0 0-4-4m4 4-4 4m9-10v12a2 2 0 0 1-2 2H8" />
+                      </svg>
                     </button>
+                    {activeMention?.key === `comment:${post.id}` && (
+                      <div className="absolute left-0 right-12 top-full z-20 mt-1 max-h-44 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-green-500/20 dark:bg-black">
+                        {activeMention.items.map((item, idx) => (
+                          <button
+                            key={`${item.anonId}:${item.handle}`}
+                            type="button"
+                            onMouseDown={(ev) => {
+                              ev.preventDefault();
+                              setActiveMentionIndex(idx);
+                              applyMentionCandidate(item);
+                            }}
+                            className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-800 ${idx === activeMentionIndex ? "bg-slate-100 dark:bg-slate-800" : ""}`}
+                          >
+                            <span className="text-sm text-slate-800 dark:text-green-200">{item.label}</span>
+                            <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">@{item.handle}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {(comments[post.id] || []).length > 0 && (
@@ -671,23 +985,76 @@ export default function Profile() {
                           const db = new Date(b.created_at).getTime();
                           return sortOrder === "newest" ? db - da : da - db;
                         })
-                        .map((c) => (
+                        .map((c) => {
+                          return (
                           <div key={c.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-green-300/10 dark:bg-slate-900/50">
                             <div className="text-xs font-mono text-slate-500 dark:text-green-300/60 mb-1">{displayUsername(c.username, c.anon_id)} • {timeAgo(c.created_at)}</div>
-                            <div className="text-sm text-slate-800 dark:text-green-300">{c.text}</div>
-                            <div className="mt-2 flex items-center gap-3 text-xs">
-                              <button onClick={() => onLikeComment(post.id, c.id)} className={`flex items-center gap-1 rounded-lg px-2 py-1 transition ${c.user_reaction === "like" ? "bg-blue-500/10 font-semibold text-blue-600 dark:bg-blue-500/20 dark:text-blue-400" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-green-300/70 dark:hover:bg-slate-700"}`}><span>👍</span><span className="font-mono">{c.likes}</span></button>
-                              <button onClick={() => onDislikeComment(post.id, c.id)} className={`flex items-center gap-1 rounded-lg px-2 py-1 transition ${c.user_reaction === "dislike" ? "bg-red-500/10 font-semibold text-red-600 dark:bg-red-500/20 dark:text-red-400" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-green-300/70 dark:hover:bg-slate-700"}`}><span>👎</span><span className="font-mono">{Math.max(0, c.dislikes)}</span></button>
-                              <button onClick={() => onToggleReplies(c.id)} className="rounded-lg bg-slate-100 px-2 py-1 font-mono text-slate-600 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-green-300/70 dark:hover:bg-slate-700">{showReplies[c.id] ? "Hide" : "Reply"}{c.replies_count > 0 ? ` (${c.replies_count})` : ""}</button>
+                            <div className="text-sm text-slate-800 dark:text-green-300">{renderTextWithMentions(c.text, mentionMap)}</div>
+                            <div className="mt-2 flex items-center gap-2 text-xs">
+                              <button
+                                onClick={() => onLikeComment(post.id, c.id)}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-md transition ${
+                                  c.user_reaction === "like"
+                                    ? "bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                }`}
+                              >
+                                <svg
+                                  className="w-4 h-4"
+                                  fill={c.user_reaction === "like" ? "currentColor" : "none"}
+                                  stroke="currentColor"
+                                  strokeWidth={c.user_reaction === "like" ? "0" : "2"}
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                                </svg>
+                                <span className="font-mono">{c.likes}</span>
+                              </button>
+                              <button
+                                onClick={() => onDislikeComment(post.id, c.id)}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-md transition ${
+                                  c.user_reaction === "dislike"
+                                    ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-semibold"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                }`}
+                              >
+                                <svg
+                                  className="w-4 h-4"
+                                  fill={c.user_reaction === "dislike" ? "currentColor" : "none"}
+                                  stroke="currentColor"
+                                  strokeWidth={c.user_reaction === "dislike" ? "0" : "2"}
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
+                                </svg>
+                                <span className="font-mono">{Math.max(0, c.dislikes)}</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (!showReplies[c.id]) {
+                                    void onToggleReplies(c.id);
+                                    onReplyToUser(c.id, c.username, c.anon_id);
+                                  } else {
+                                    void onToggleReplies(c.id);
+                                  }
+                                }}
+                                className="rounded-lg bg-slate-100 px-2 py-1 font-mono text-slate-600 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-green-300/70 dark:hover:bg-slate-700"
+                              >
+                                {showReplies[c.id] ? "Hide" : "Reply"}{c.replies_count > 0 ? ` (${c.replies_count})` : ""}
+                              </button>
                             </div>
 
                             {showReplies[c.id] && (
                               <div className="mt-3 pl-3 border-l border-slate-200 dark:border-green-300/20">
-                                <div className="flex gap-2 mb-2">
+                                <div className="relative flex gap-2 mb-2">
                                   <input
+                                    id={`profile-reply-input-${c.id}`}
                                     value={replyText[c.id] || ""}
-                                    onChange={(e) => setReplyText((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                                    onChange={(e) => handleReplyInputChange(c.id, `profile-reply-input-${c.id}`, mentionCandidates, e)}
                                     onKeyDown={(e) => {
+                                      if (handleMentionKeyDown(`reply:${c.id}`, e)) {
+                                        return;
+                                      }
                                       if (e.key === "Enter" && !e.shiftKey) {
                                         e.preventDefault();
                                         onSubmitReply(post.id, c.id);
@@ -697,6 +1064,25 @@ export default function Profile() {
                                     className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 placeholder-slate-400 outline-none focus:ring-2 focus:ring-emerald-500 dark:border-green-300/30 dark:bg-black dark:text-green-300 dark:placeholder-green-300/40 dark:focus:ring-green-300/50"
                                   />
                                   <button onClick={() => onSubmitReply(post.id, c.id)} disabled={!replyText[c.id]?.trim()} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-mono text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-300/10 dark:text-green-300 dark:hover:bg-green-300/20">Reply</button>
+                                  {activeMention?.key === `reply:${c.id}` && (
+                                    <div className="absolute left-0 right-12 top-full z-20 mt-1 max-h-44 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-green-500/20 dark:bg-black">
+                                      {activeMention.items.map((item, idx) => (
+                                        <button
+                                          key={`${item.anonId}:${item.handle}`}
+                                          type="button"
+                                          onMouseDown={(ev) => {
+                                            ev.preventDefault();
+                                            setActiveMentionIndex(idx);
+                                            applyMentionCandidate(item);
+                                          }}
+                                          className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-800 ${idx === activeMentionIndex ? "bg-slate-100 dark:bg-slate-800" : ""}`}
+                                        >
+                                          <span className="text-sm text-slate-800 dark:text-green-200">{item.label}</span>
+                                          <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">@{item.handle}</span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                                 {loadingReplies[c.id] ? (
                                   <div className="text-xs text-slate-500 dark:text-green-300/60">Loading replies...</div>
@@ -705,7 +1091,7 @@ export default function Profile() {
                                     {(replies[c.id] || []).map((r) => (
                                       <div key={r.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-green-300/10 dark:bg-slate-900/50">
                                         <div className="text-xs font-mono text-slate-500 dark:text-green-300/60 mb-1">{displayUsername(r.username, r.anon_id)} • {timeAgo(r.created_at)}</div>
-                                        <div className="text-sm text-slate-800 dark:text-green-300">{r.text}</div>
+                                        <div className="text-sm text-slate-800 dark:text-green-300">{renderTextWithMentions(r.text, mentionMap)}</div>
                                         <div className="mt-2 flex items-center gap-2 text-xs">
                                           <button onClick={() => onLikeReply(c.id, r.id)} className={`flex items-center gap-1 rounded-lg px-2 py-1 transition ${r.user_reaction === "like" ? "bg-blue-500/10 font-semibold text-blue-600 dark:bg-blue-500/20 dark:text-blue-400" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-green-300/70 dark:hover:bg-slate-700"}`}><span>👍</span><span className="font-mono">{r.likes}</span></button>
                                           <button onClick={() => onDislikeReply(c.id, r.id)} className={`flex items-center gap-1 rounded-lg px-2 py-1 transition ${r.user_reaction === "dislike" ? "bg-red-500/10 font-semibold text-red-600 dark:bg-red-500/20 dark:text-red-400" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-green-300/70 dark:hover:bg-slate-700"}`}><span>👎</span><span className="font-mono">{Math.max(0, r.dislikes)}</span></button>
@@ -717,13 +1103,15 @@ export default function Profile() {
                               </div>
                             )}
                           </div>
-                        ))}
+                        );
+                        })}
                     </div>
                   )}
                 </div>
               )}
             </article>
-          ))}
+          );
+          })}
         </div>
       </section>
 

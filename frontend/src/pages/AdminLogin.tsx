@@ -5,7 +5,7 @@ import AdminShell from "../components/AdminShell";
 import { getAdminToken, loginAdmin, setAdminToken } from "../services/adminApi";
 
 const card =
-    "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-6";
+    "rounded-2xl border border-emerald-500/20 dark:border-green-500/20 bg-white/80 dark:bg-black/55 backdrop-blur p-4 sm:p-5";
 
 export default function AdminLogin() {
     const navigate = useNavigate();
@@ -38,37 +38,37 @@ export default function AdminLogin() {
 
     return (
         <AdminShell variant="login">
-            <div className="space-y-6">
-                <div>
-                    <h1 className="text-3xl font-semibold text-green-100">Admin Access</h1>
-                    <p className="text-sm text-green-300/70">
+            <div className="space-y-4 sm:space-y-5">
+                <div className="space-y-1">
+                    <h1 className="text-2xl sm:text-3xl font-semibold text-slate-950 dark:text-green-100">Admin Access</h1>
+                    <p className="text-xs sm:text-sm text-slate-700 dark:text-green-300/70">
                         Sign in to manage moderation, system health, and audits.
                     </p>
                 </div>
 
                 <div className={card}>
-                    <form onSubmit={handleSubmit} className="space-y-4">
+                    <form onSubmit={handleSubmit} className="space-y-3.5">
                         <label className="block">
-                            <span className="text-xs font-mono text-green-300/70">Email</span>
+                            <span className="text-xs font-mono text-slate-600 dark:text-green-300/70">Email</span>
                             <input
                                 type="email"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 placeholder="papa@gmail.com"
-                                className="mt-2 w-full rounded-xl bg-white/10 border border-emerald-500/25 px-3 py-2 text-sm text-green-100 outline-none focus:ring-2 focus:ring-emerald-500/30"
+                                className="mt-1.5 w-full rounded-xl bg-white/80 dark:bg-white/10 border border-emerald-500/25 px-3 py-2 text-sm text-slate-900 dark:text-green-100 placeholder:text-slate-400 dark:placeholder:text-green-300/45 outline-none focus:ring-2 focus:ring-emerald-500/40 dark:focus:ring-emerald-500/30"
                                 autoComplete="username"
                                 required
                             />
                         </label>
 
                         <label className="block">
-                            <span className="text-xs font-mono text-green-300/70">Password</span>
+                            <span className="text-xs font-mono text-slate-600 dark:text-green-300/70">Password</span>
                             <input
                                 type="password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder="papa@"
-                                className="mt-2 w-full rounded-xl bg-white/10 border border-emerald-500/25 px-3 py-2 text-sm text-green-100 outline-none focus:ring-2 focus:ring-emerald-500/30"
+                                className="mt-1.5 w-full rounded-xl bg-white/80 dark:bg-white/10 border border-emerald-500/25 px-3 py-2 text-sm text-slate-900 dark:text-green-100 placeholder:text-slate-400 dark:placeholder:text-green-300/45 outline-none focus:ring-2 focus:ring-emerald-500/40 dark:focus:ring-emerald-500/30"
                                 autoComplete="current-password"
                                 required
                             />
@@ -81,14 +81,14 @@ export default function AdminLogin() {
                         <button
                             type="submit"
                             disabled={isLoading}
-                            className="w-full rounded-xl px-4 py-2 text-sm font-mono border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
+                            className="w-full rounded-xl px-4 py-2 text-sm font-mono border border-emerald-500/40 bg-emerald-500/12 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
                         >
                             {isLoading ? "Signing in..." : "Sign in"}
                         </button>
                     </form>
                 </div>
 
-                <div className="text-xs text-green-400/70 font-mono">
+                <div className="text-xs text-slate-600 dark:text-green-400/70 font-mono">
                     This panel is protected. Credentials are required.
                 </div>
             </div>

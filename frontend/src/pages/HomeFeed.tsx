@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import TrustRequestModal from "../components/TrustRequestModal";
 import { useTrust } from "../contexts/TrustContext";
@@ -11,6 +11,28 @@ import { getMyAnonId } from "../services/session";
 // Helper to display username or fallback
 const displayUsername = (username?: string, anonId?: string): string => {
     return username || `User #${anonId?.substring(0, 8) || 'unknown'}`;
+};
+
+const toMentionHandle = (username?: string, anonId?: string): string => {
+    const fallback = anonId ? `user_${anonId.substring(0, 8)}` : "user";
+    const raw = (username || fallback).toLowerCase();
+    const normalized = raw.replace(/[^a-z0-9_]/g, "_").replace(/^_+|_+$/g, "");
+    return normalized || fallback;
+};
+
+type MentionCandidate = {
+    handle: string;
+    label: string;
+    anonId: string;
+};
+
+type ActiveMentionState = {
+    key: string;
+    inputId: string;
+    start: number;
+    end: number;
+    query: string;
+    items: MentionCandidate[];
 };
 
 const REPORT_REASON_OPTIONS = [
@@ -54,6 +76,8 @@ export default function HomeFeed() {
     const [showReplies, setShowReplies] = useState<Record<string, boolean>>({});
     const [replies, setReplies] = useState<Record<string, ApiCommentReply[]>>({});
     const [loadingReplies, setLoadingReplies] = useState<Record<string, boolean>>({});
+    const [activeMention, setActiveMention] = useState<ActiveMentionState | null>(null);
+    const [activeMentionIndex, setActiveMentionIndex] = useState(0);
 
     // TrustContext is the single source of truth (persists via localStorage)
     const { getStatusForUser } = useTrust();
@@ -466,8 +490,8 @@ export default function HomeFeed() {
         }
     };
 
-    const handleReplyClick = (commentId: string, anonId: string) => {
-        const mention = `@${anonId.substring(0, 8)} `;
+    const handleReplyClick = (commentId: string, username?: string, anonId?: string) => {
+        const mention = `@${toMentionHandle(username, anonId)} `;
         setReplyText({ ...replyText, [commentId]: mention });
         // Focus the reply input
         setTimeout(() => {
@@ -479,11 +503,211 @@ export default function HomeFeed() {
         }, 100);
     };
 
+    const registerMentionTarget = (map: Record<string, string>, username?: string, anonId?: string) => {
+        if (!anonId) return;
+        const shortId = anonId.substring(0, 8).toLowerCase();
+        map[toMentionHandle(username, anonId)] = anonId;
+        map[toMentionHandle(undefined, anonId)] = anonId;
+        map[shortId] = anonId;
+        map[`#${shortId}`] = anonId;
+        map[anonId.toLowerCase()] = anonId;
+    };
+
+    const buildMentionMapForPost = (postId: string, postUsername?: string, postAnonId?: string): Record<string, string> => {
+        const map: Record<string, string> = {};
+        registerMentionTarget(map, postUsername, postAnonId);
+
+        const postComments = comments[postId] || [];
+        for (const comment of postComments) {
+            registerMentionTarget(map, comment.username, comment.anon_id);
+            const commentReplies = replies[comment.id] || [];
+            for (const reply of commentReplies) {
+                registerMentionTarget(map, reply.username, reply.anon_id);
+            }
+        }
+
+        return map;
+    };
+
+    const buildMentionCandidatesForPost = (postId: string, postUsername?: string, postAnonId?: string): MentionCandidate[] => {
+        const candidatesByAnon = new Map<string, MentionCandidate>();
+
+        const addCandidate = (username?: string, anonId?: string) => {
+            if (!anonId) return;
+            if (candidatesByAnon.has(anonId)) return;
+            candidatesByAnon.set(anonId, {
+                anonId,
+                handle: toMentionHandle(username, anonId),
+                label: displayUsername(username, anonId),
+            });
+        };
+
+        addCandidate(postUsername, postAnonId);
+
+        const postComments = comments[postId] || [];
+        for (const comment of postComments) {
+            addCandidate(comment.username, comment.anon_id);
+            const commentReplies = replies[comment.id] || [];
+            for (const reply of commentReplies) {
+                addCandidate(reply.username, reply.anon_id);
+            }
+        }
+
+        return Array.from(candidatesByAnon.values());
+    };
+
+    const getMentionTrigger = (text: string, cursor: number) => {
+        const left = text.slice(0, cursor);
+        const match = /(^|\s)@(#?[a-zA-Z0-9_-]*)$/.exec(left);
+        if (!match) return null;
+        const start = left.lastIndexOf("@");
+        if (start < 0) return null;
+        return {
+            query: (match[2] || "").toLowerCase(),
+            start,
+            end: cursor,
+        };
+    };
+
+    const updateMentionSuggestions = (
+        key: string,
+        inputId: string,
+        text: string,
+        cursor: number,
+        candidates: MentionCandidate[]
+    ) => {
+        const trigger = getMentionTrigger(text, cursor);
+        if (!trigger) {
+            if (activeMention?.key === key) setActiveMention(null);
+            return;
+        }
+
+        const normalizedQuery = trigger.query.startsWith("#") ? trigger.query.slice(1) : trigger.query;
+
+        const filtered = candidates
+            .filter((c) => {
+                const shortId = c.anonId.substring(0, 8).toLowerCase();
+                return (
+                    c.handle.includes(normalizedQuery) ||
+                    c.label.toLowerCase().includes(normalizedQuery) ||
+                    c.anonId.toLowerCase().includes(normalizedQuery) ||
+                    shortId.includes(normalizedQuery)
+                );
+            })
+            .slice(0, 6);
+
+        if (!filtered.length) {
+            if (activeMention?.key === key) setActiveMention(null);
+            return;
+        }
+
+        setActiveMentionIndex(0);
+
+        setActiveMention({
+            key,
+            inputId,
+            start: trigger.start,
+            end: trigger.end,
+            query: trigger.query,
+            items: filtered,
+        });
+    };
+
+    const handleCommentInputChange = (
+        postId: string,
+        inputId: string,
+        candidates: MentionCandidate[],
+        e: React.ChangeEvent<HTMLInputElement>
+    ) => {
+        const value = e.target.value;
+        const cursor = e.target.selectionStart ?? value.length;
+        setCommentText((prev) => ({ ...prev, [postId]: value }));
+        updateMentionSuggestions(`comment:${postId}`, inputId, value, cursor, candidates);
+    };
+
+    const handleReplyInputChange = (
+        commentId: string,
+        inputId: string,
+        candidates: MentionCandidate[],
+        e: React.ChangeEvent<HTMLInputElement>
+    ) => {
+        const value = e.target.value;
+        const cursor = e.target.selectionStart ?? value.length;
+        setReplyText((prev) => ({ ...prev, [commentId]: value }));
+        updateMentionSuggestions(`reply:${commentId}`, inputId, value, cursor, candidates);
+    };
+
+    const applyMentionCandidate = (candidate: MentionCandidate) => {
+        if (!activeMention) return;
+
+        const isIdQuery = activeMention.query.startsWith("#");
+        const mentionHandle = isIdQuery ? `#${candidate.anonId.substring(0, 8).toLowerCase()}` : candidate.handle;
+        const mention = `@${mentionHandle} `;
+        const nextCursor = activeMention.start + mention.length;
+
+        if (activeMention.key.startsWith("comment:")) {
+            const postId = activeMention.key.slice("comment:".length);
+            setCommentText((prev) => {
+                const current = prev[postId] || "";
+                const next = current.slice(0, activeMention.start) + mention + current.slice(activeMention.end);
+                return { ...prev, [postId]: next };
+            });
+        } else if (activeMention.key.startsWith("reply:")) {
+            const commentId = activeMention.key.slice("reply:".length);
+            setReplyText((prev) => {
+                const current = prev[commentId] || "";
+                const next = current.slice(0, activeMention.start) + mention + current.slice(activeMention.end);
+                return { ...prev, [commentId]: next };
+            });
+        }
+
+        const inputId = activeMention.inputId;
+        setActiveMention(null);
+
+        setTimeout(() => {
+            const input = document.getElementById(inputId) as HTMLInputElement | null;
+            if (!input) return;
+            input.focus();
+            input.setSelectionRange(nextCursor, nextCursor);
+        }, 0);
+    };
+
+    const handleMentionKeyDown = (key: string, e: React.KeyboardEvent<HTMLInputElement>): boolean => {
+        if (!activeMention || activeMention.key !== key || activeMention.items.length === 0) {
+            return false;
+        }
+
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setActiveMentionIndex((prev) => (prev + 1) % activeMention.items.length);
+            return true;
+        }
+
+        if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setActiveMentionIndex((prev) => (prev - 1 + activeMention.items.length) % activeMention.items.length);
+            return true;
+        }
+
+        if (e.key === "Enter" || e.key === "Tab") {
+            e.preventDefault();
+            applyMentionCandidate(activeMention.items[activeMentionIndex] || activeMention.items[0]);
+            return true;
+        }
+
+        if (e.key === "Escape") {
+            e.preventDefault();
+            setActiveMention(null);
+            return true;
+        }
+
+        return false;
+    };
+
     // Function to render text with mentions highlighted
-    const renderTextWithMentions = (text: string) => {
-        // Match @userid pattern (8 characters after @)
-        const mentionRegex = /@(\w{8})/g;
-        const parts = [];
+    const renderTextWithMentions = (text: string, mentionMap: Record<string, string>) => {
+        const mentionRegex = /@(#?[a-zA-Z0-9_-]+)/g;
+        const parts: ReactNode[] = [];
         let lastIndex = 0;
         let match;
 
@@ -492,14 +716,20 @@ export default function HomeFeed() {
             if (match.index > lastIndex) {
                 parts.push(text.substring(lastIndex, match.index));
             }
-            // Add mention with styling
+            const handle = match[1].toLowerCase();
+            const targetAnonId = mentionMap[handle];
+            if (!targetAnonId) {
+                parts.push(match[0]);
+                lastIndex = match.index + match[0].length;
+                continue;
+            }
             parts.push(
                 <span 
                     key={match.index} 
                     className="text-blue-600 dark:text-blue-400 font-semibold cursor-pointer hover:underline"
                     onClick={(e) => {
                         e.stopPropagation();
-                        // Could add user profile view here
+                        navigate(`/app/profile/${targetAnonId}`);
                     }}
                 >
                     {match[0]}
@@ -729,6 +959,8 @@ export default function HomeFeed() {
                 <div className="space-y-4">
                     {searchResults.map((result) => {
                         const post = result.post;
+                        const mentionMap = buildMentionMapForPost(post.id, post.username, post.anon_id);
+                        const mentionCandidates = buildMentionCandidatesForPost(post.id, post.username, post.anon_id);
 
                         const timeAgo = (isoDate: string) => {
                             const minutes = Math.floor((Date.now() - new Date(isoDate).getTime()) / 60000);
@@ -870,12 +1102,16 @@ export default function HomeFeed() {
                                 {/* Comments Section */}
                                 {showComments[post.id] && (
                                     <div className="mt-3 border-t border-slate-200 dark:border-green-300/20 pt-3">
-                                        <div className="flex gap-2 mb-3">
+                                        <div className="relative flex gap-2 mb-3">
                                             <input
+                                                id={`comment-input-${post.id}`}
                                                 type="text"
                                                 value={commentText[post.id] || ""}
-                                                onChange={(e) => setCommentText({ ...commentText, [post.id]: e.target.value })}
+                                                onChange={(e) => handleCommentInputChange(post.id, `comment-input-${post.id}`, mentionCandidates, e)}
                                                 onKeyDown={(e) => {
+                                                    if (handleMentionKeyDown(`comment:${post.id}`, e)) {
+                                                        return;
+                                                    }
                                                     if (e.key === 'Enter' && !e.shiftKey) {
                                                         e.preventDefault();
                                                         handleSubmitComment(post.id);
@@ -889,10 +1125,33 @@ export default function HomeFeed() {
                                                 type="button"
                                                 onClick={() => handleSubmitComment(post.id)}
                                                 disabled={!commentText[post.id]?.trim()}
-                                                className="px-4 py-2 text-sm font-mono rounded-lg bg-emerald-500 dark:bg-green-300/10 text-white dark:text-green-300 hover:bg-emerald-600 dark:hover:bg-green-300/20 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                                                className="inline-flex items-center justify-center px-3 py-2 rounded-lg bg-emerald-500 dark:bg-green-300/10 text-white dark:text-green-300 hover:bg-emerald-600 dark:hover:bg-green-300/20 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                                                aria-label="Send comment"
+                                                title="Send comment"
                                             >
-                                                Post
+                                                <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h11m0 0-4-4m4 4-4 4m9-10v12a2 2 0 0 1-2 2H8" />
+                                                </svg>
                                             </button>
+                                            {activeMention?.key === `comment:${post.id}` && (
+                                                <div className="absolute left-0 right-12 top-full z-20 mt-1 max-h-44 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-green-500/20 dark:bg-black">
+                                                    {activeMention.items.map((item, idx) => (
+                                                        <button
+                                                            key={`${item.anonId}:${item.handle}`}
+                                                            type="button"
+                                                            onMouseDown={(ev) => {
+                                                                ev.preventDefault();
+                                                                setActiveMentionIndex(idx);
+                                                                applyMentionCandidate(item);
+                                                            }}
+                                                            className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-800 ${idx === activeMentionIndex ? "bg-slate-100 dark:bg-slate-800" : ""}`}
+                                                        >
+                                                            <span className="text-sm text-slate-800 dark:text-green-200">{item.label}</span>
+                                                            <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">@{item.handle}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
 
                                         {loadingComments[post.id] ? (
@@ -917,7 +1176,7 @@ export default function HomeFeed() {
                                                                     {displayUsername(comment.username, comment.anon_id)} • {timeAgo(comment.created_at)}
                                                                 </div>
                                                                 <div className="text-sm text-slate-800 dark:text-green-300 wrap-break-word">
-                                                                    {renderTextWithMentions(comment.text)}
+                                                                    {renderTextWithMentions(comment.text, mentionMap)}
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -941,6 +1200,8 @@ export default function HomeFeed() {
         ) : (
         <div className="space-y-4">
             {posts.map((post) => {
+            const mentionMap = buildMentionMapForPost(post.id, post.username, post.anon_id);
+            const mentionCandidates = buildMentionCandidatesForPost(post.id, post.username, post.anon_id);
             const isOwnPost = !!myAnonId && post.anon_id === myAnonId;
             const userKey = `user_${post.anon_id.substring(0, 8)}`; // threadId & trust key
             const status = getStatusForUser(userKey); // "none" | "pending" | "accepted" | "declined"
@@ -1108,12 +1369,16 @@ export default function HomeFeed() {
                 {showComments[post.id] && (
                     <div className="mt-3 border-t border-slate-200 dark:border-green-300/20 pt-3">
                         {/* Comment Input */}
-                        <div className="flex gap-2 mb-3">
+                        <div className="relative flex gap-2 mb-3">
                             <input
+                                id={`comment-input-${post.id}`}
                                 type="text"
                                 value={commentText[post.id] || ""}
-                                onChange={(e) => setCommentText({ ...commentText, [post.id]: e.target.value })}
+                                onChange={(e) => handleCommentInputChange(post.id, `comment-input-${post.id}`, mentionCandidates, e)}
                                 onKeyDown={(e) => {
+                                    if (handleMentionKeyDown(`comment:${post.id}`, e)) {
+                                        return;
+                                    }
                                     if (e.key === 'Enter' && !e.shiftKey) {
                                         e.preventDefault();
                                         handleSubmitComment(post.id);
@@ -1127,10 +1392,33 @@ export default function HomeFeed() {
                                 type="button"
                                 onClick={() => handleSubmitComment(post.id)}
                                 disabled={!commentText[post.id]?.trim()}
-                                className="px-4 py-2 text-sm font-mono rounded-lg bg-emerald-500 dark:bg-green-300/10 text-white dark:text-green-300 hover:bg-emerald-600 dark:hover:bg-green-300/20 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                                className="inline-flex items-center justify-center px-3 py-2 rounded-lg bg-emerald-500 dark:bg-green-300/10 text-white dark:text-green-300 hover:bg-emerald-600 dark:hover:bg-green-300/20 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                                aria-label="Send comment"
+                                title="Send comment"
                             >
-                                Post
+                                <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h11m0 0-4-4m4 4-4 4m9-10v12a2 2 0 0 1-2 2H8" />
+                                </svg>
                             </button>
+                            {activeMention?.key === `comment:${post.id}` && (
+                                <div className="absolute left-0 right-12 top-full z-20 mt-1 max-h-44 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-green-500/20 dark:bg-black">
+                                    {activeMention.items.map((item, idx) => (
+                                        <button
+                                            key={`${item.anonId}:${item.handle}`}
+                                            type="button"
+                                            onMouseDown={(ev) => {
+                                                ev.preventDefault();
+                                                setActiveMentionIndex(idx);
+                                                applyMentionCandidate(item);
+                                            }}
+                                            className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-800 ${idx === activeMentionIndex ? "bg-slate-100 dark:bg-slate-800" : ""}`}
+                                        >
+                                            <span className="text-sm text-slate-800 dark:text-green-200">{item.label}</span>
+                                            <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">@{item.handle}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         {/* Comment Filter */}
@@ -1179,9 +1467,9 @@ export default function HomeFeed() {
                                                     {displayUsername(comment.username, comment.anon_id)} • {timeAgo(comment.created_at)}
                                                 </div>
                                                 <div className="text-sm text-slate-800 dark:text-green-300 break-words">
-                                                    {renderTextWithMentions(comment.text)}
+                                                    {renderTextWithMentions(comment.text, mentionMap)}
                                                 </div>
-                                                <div className="mt-2 flex items-center gap-4 text-sm">
+                                                <div className="mt-2 flex items-center gap-2 text-xs">
                                                     <button
                                                         type="button"
                                                         onClick={(event) => {
@@ -1189,14 +1477,14 @@ export default function HomeFeed() {
                                                             event.stopPropagation();
                                                             handleLikeComment(post.id, comment.id);
                                                         }}
-                                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+                                                        className={`flex items-center gap-1 px-2 py-1 rounded-md transition ${
                                                             comment.user_reaction === "like"
                                                                 ? "bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold"
                                                                 : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
                                                         }`}
                                                     >
                                                         <svg
-                                                            className="w-5 h-5"
+                                                            className="w-4 h-4"
                                                             fill={comment.user_reaction === "like" ? "currentColor" : "none"}
                                                             stroke="currentColor"
                                                             strokeWidth={comment.user_reaction === "like" ? "0" : "2"}
@@ -1213,14 +1501,14 @@ export default function HomeFeed() {
                                                             event.stopPropagation();
                                                             handleDislikeComment(post.id, comment.id);
                                                         }}
-                                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+                                                        className={`flex items-center gap-1 px-2 py-1 rounded-md transition ${
                                                             comment.user_reaction === "dislike"
                                                                 ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400 font-semibold"
                                                                 : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700"
                                                         }`}
                                                     >
                                                         <svg
-                                                            className="w-5 h-5"
+                                                            className="w-4 h-4"
                                                             fill={comment.user_reaction === "dislike" ? "currentColor" : "none"}
                                                             stroke="currentColor"
                                                             strokeWidth={comment.user_reaction === "dislike" ? "0" : "2"}
@@ -1235,7 +1523,7 @@ export default function HomeFeed() {
                                                         onClick={() => {
                                                             if (!showReplies[comment.id]) {
                                                                 toggleReplies(comment.id);
-                                                                handleReplyClick(comment.id, comment.anon_id);
+                                                                handleReplyClick(comment.id, comment.username, comment.anon_id);
                                                             } else {
                                                                 toggleReplies(comment.id);
                                                             }
@@ -1249,13 +1537,16 @@ export default function HomeFeed() {
 
                                                 {showReplies[comment.id] && (
                                                     <div className="mt-3 pl-3 border-l border-slate-200 dark:border-green-300/20">
-                                                        <div className="flex gap-2 mb-2">
+                                                        <div className="relative flex gap-2 mb-2">
                                                             <input
                                                                 id={`reply-input-${comment.id}`}
                                                                 type="text"
                                                                 value={replyText[comment.id] || ""}
-                                                                onChange={(e) => setReplyText({ ...replyText, [comment.id]: e.target.value })}
+                                                                onChange={(e) => handleReplyInputChange(comment.id, `reply-input-${comment.id}`, mentionCandidates, e)}
                                                                 onKeyDown={(e) => {
+                                                                    if (handleMentionKeyDown(`reply:${comment.id}`, e)) {
+                                                                        return;
+                                                                    }
                                                                     if (e.key === "Enter" && !e.shiftKey) {
                                                                         e.preventDefault();
                                                                         handleSubmitReply(post.id, comment.id);
@@ -1273,6 +1564,25 @@ export default function HomeFeed() {
                                                             >
                                                                 Reply
                                                             </button>
+                                                            {activeMention?.key === `reply:${comment.id}` && (
+                                                                <div className="absolute left-0 right-12 top-full z-20 mt-1 max-h-44 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-green-500/20 dark:bg-black">
+                                                                    {activeMention.items.map((item, idx) => (
+                                                                        <button
+                                                                            key={`${item.anonId}:${item.handle}`}
+                                                                            type="button"
+                                                                            onMouseDown={(ev) => {
+                                                                                ev.preventDefault();
+                                                                                setActiveMentionIndex(idx);
+                                                                                applyMentionCandidate(item);
+                                                                            }}
+                                                                            className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-800 ${idx === activeMentionIndex ? "bg-slate-100 dark:bg-slate-800" : ""}`}
+                                                                        >
+                                                                            <span className="text-sm text-slate-800 dark:text-green-200">{item.label}</span>
+                                                                            <span className="font-mono text-xs text-slate-500 dark:text-green-300/60">@{item.handle}</span>
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
 
                                                         {loadingReplies[comment.id] ? (
@@ -1290,7 +1600,7 @@ export default function HomeFeed() {
                                                                                     {displayUsername(reply.username, reply.anon_id)} • {timeAgo(reply.created_at)}
                                                                                 </div>
                                                                                 <div className="text-sm text-slate-800 dark:text-green-300 break-words">
-                                                                                    {renderTextWithMentions(reply.text)}
+                                                                                    {renderTextWithMentions(reply.text, mentionMap)}
                                                                                 </div>
                                                                                 <div className="mt-2 flex items-center gap-3 text-xs">
                                                                                     <button
@@ -1343,7 +1653,7 @@ export default function HomeFeed() {
                                                                                     </button>
                                                                                     <button
                                                                                         type="button"
-                                                                                        onClick={() => handleReplyClick(comment.id, reply.anon_id)}
+                                                                                        onClick={() => handleReplyClick(comment.id, reply.username, reply.anon_id)}
                                                                                         className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-green-300/70 hover:bg-slate-200 dark:hover:bg-slate-700 font-mono transition"
                                                                                     >
                                                                                         Reply

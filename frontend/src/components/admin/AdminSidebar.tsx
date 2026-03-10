@@ -9,7 +9,12 @@ import {
     ClipboardDocumentListIcon,
     ArrowRightOnRectangleIcon,
     UserGroupIcon,
+    SunIcon,
+    MoonIcon,
+    ComputerDesktopIcon,
 } from "@heroicons/react/24/outline";
+import type { ComponentType } from "react";
+import { useTheme } from "../../contexts/ThemeContext";
 
 type AdminSidebarProps = {
     currentPage: string;
@@ -30,8 +35,20 @@ const navItems = [
 ];
 
 export default function AdminSidebar({ currentPage, onNavigate, onLogout }: AdminSidebarProps) {
+    const { themeMode, setThemeMode } = useTheme();
+
+    const themeOptions: Array<{
+        mode: "light" | "dark" | "system";
+        label: string;
+        icon: ComponentType<{ className?: string }>;
+    }> = [
+        { mode: "light", label: "Light", icon: SunIcon },
+        { mode: "dark", label: "Dark", icon: MoonIcon },
+        { mode: "system", label: "System", icon: ComputerDesktopIcon },
+    ];
+
     return (
-        <aside className="w-[260px] shrink-0 border-r border-emerald-500/15 dark:border-green-500/20 bg-white/40 dark:bg-black/40 backdrop-blur-sm flex flex-col">
+        <aside className="sticky top-0 h-screen w-[260px] shrink-0 border-r border-emerald-500/15 dark:border-green-500/20 bg-white/40 dark:bg-black/40 backdrop-blur-sm flex flex-col">
             {/* Header */}
             <div className="p-6 border-b border-emerald-500/15 dark:border-green-500/20">
                 <div className="flex items-center gap-2">
@@ -71,6 +88,36 @@ export default function AdminSidebar({ currentPage, onNavigate, onLogout }: Admi
                     );
                 })}
             </nav>
+
+            {/* Theme Mode */}
+            <div className="px-4 pb-4">
+                <div className="rounded-xl border border-emerald-500/15 dark:border-green-500/20 bg-white/45 dark:bg-black/30 p-2">
+                    <p className="px-2 pb-2 text-[11px] font-mono tracking-wider uppercase text-slate-600 dark:text-green-300/70">
+                        Theme
+                    </p>
+                    <div className="grid grid-cols-3 gap-1">
+                        {themeOptions.map((opt) => {
+                            const Icon = opt.icon;
+                            const isActive = themeMode === opt.mode;
+                            return (
+                                <button
+                                    key={opt.mode}
+                                    type="button"
+                                    onClick={() => setThemeMode(opt.mode)}
+                                    className={`flex flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-[11px] font-medium transition ${
+                                        isActive
+                                            ? "bg-emerald-500/15 dark:bg-green-500/20 text-emerald-900 dark:text-green-100 border border-emerald-500/30 dark:border-green-500/30"
+                                            : "text-slate-600 dark:text-green-300/70 hover:bg-emerald-500/10 dark:hover:bg-green-500/10"
+                                    }`}
+                                >
+                                    <Icon className="h-4 w-4" />
+                                    <span>{opt.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
 
             {/* Logout */}
             <div className="p-4 border-t border-emerald-500/15 dark:border-green-500/20">
