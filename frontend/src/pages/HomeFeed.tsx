@@ -150,7 +150,11 @@ export default function HomeFeed() {
         }
     };
 
-    const openTrustModal = (postId: string) => {
+    const openTrustModal = async (postId: string, targetAnonId: string) => {
+        if (myAnonId && targetAnonId === myAnonId) {
+            await showAlert({ title: "Invalid Request", message: "You cannot send a trust request to yourself.", danger: true });
+            return;
+        }
         setPendingPostId(postId);
         setTrustOpen(true);
         setHoveredReplyId(null);
@@ -937,6 +941,7 @@ export default function HomeFeed() {
         ) : (
         <div className="space-y-4">
             {posts.map((post) => {
+            const isOwnPost = !!myAnonId && post.anon_id === myAnonId;
             const userKey = `user_${post.anon_id.substring(0, 8)}`; // threadId & trust key
             const status = getStatusForUser(userKey); // "none" | "pending" | "accepted" | "declined"
             const trusted = status === "accepted";
@@ -1381,6 +1386,7 @@ export default function HomeFeed() {
                 )}
 
                 {/* Actions */}
+                {!isOwnPost && (
                 <div className="mt-3 flex flex-wrap gap-3 text-xs font-mono">
                     {/* Reply with trust gate + tooltip */}
                     <div className="relative">
@@ -1427,7 +1433,7 @@ export default function HomeFeed() {
                     <button
                         type="button"
                         disabled={trustButtonDisabled}
-                        onClick={() => openTrustModal(post.id)}
+                        onClick={() => openTrustModal(post.id, post.anon_id)}
                         className={`rounded-lg px-3 py-1 border transition ${trustButtonClass}`}
                     >
                         {trustButtonLabel}
@@ -1468,6 +1474,7 @@ export default function HomeFeed() {
                         </button>
                     )}
                 </div>
+                )}
                 </div>
             );
             })}
