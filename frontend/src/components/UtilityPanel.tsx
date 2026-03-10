@@ -107,7 +107,7 @@ export default function UtilityPanel() {
     }
 
     function MapUtility() {
-    const ghostMode = true; // UI mirror (map owns real toggle)
+    const ghostMode = true;
     const region = "NEPAL • BAGMATI";
 
     const { geoState, pings } = useGeoPings({
@@ -152,7 +152,10 @@ export default function UtilityPanel() {
 
         <UtilityCard title="Privacy">
             <div className="text-sm text-slate-800 dark:text-green-200">
-            Ghost Mode: <span className="font-mono">ON</span>
+            Ghost Mode: <span className="font-mono">Planned</span>
+            </div>
+            <div className="text-sm text-slate-800 dark:text-green-200 mt-1">
+            Region: <span className="font-mono">Planned</span>
             </div>
         </UtilityCard>
 

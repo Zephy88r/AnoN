@@ -8,7 +8,7 @@ const card =
     "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-4";
 
 export default function Settings() {
-    const { resolvedTheme } = useTheme();
+    const { themeMode, setThemeMode, resolvedTheme } = useTheme();
     const navigate = useNavigate();
 
     // stable anon id (shortened for display)
@@ -20,7 +20,6 @@ export default function Settings() {
     const [username, setUsername] = useState(getMyUsername());
 
     useEffect(() => {
-        setUsername(getMyUsername());
         return onSessionIdentityUpdated(() => {
             setUsername(getMyUsername());
         });
@@ -55,6 +54,42 @@ export default function Settings() {
             </span>
             </div>
 
+            <div className="mt-4 grid grid-cols-3 gap-2">
+            <button
+                type="button"
+                onClick={() => setThemeMode("system")}
+                className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                    themeMode === "system"
+                        ? "border-emerald-600 bg-emerald-600/10 text-emerald-800 dark:border-green-400 dark:bg-green-500/15 dark:text-green-100"
+                        : "border-emerald-500/20 text-slate-700 hover:bg-emerald-500/10 dark:border-green-500/25 dark:text-green-200 dark:hover:bg-green-500/10"
+                }`}
+            >
+                System
+            </button>
+            <button
+                type="button"
+                onClick={() => setThemeMode("light")}
+                className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                    themeMode === "light"
+                        ? "border-emerald-600 bg-emerald-600/10 text-emerald-800 dark:border-green-400 dark:bg-green-500/15 dark:text-green-100"
+                        : "border-emerald-500/20 text-slate-700 hover:bg-emerald-500/10 dark:border-green-500/25 dark:text-green-200 dark:hover:bg-green-500/10"
+                }`}
+            >
+                Light
+            </button>
+            <button
+                type="button"
+                onClick={() => setThemeMode("dark")}
+                className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                    themeMode === "dark"
+                        ? "border-emerald-600 bg-emerald-600/10 text-emerald-800 dark:border-green-400 dark:bg-green-500/15 dark:text-green-100"
+                        : "border-emerald-500/20 text-slate-700 hover:bg-emerald-500/10 dark:border-green-500/25 dark:text-green-200 dark:hover:bg-green-500/10"
+                }`}
+            >
+                Dark
+            </button>
+            </div>
+
             <div className="mt-2 text-xs text-slate-600 dark:text-green-300/70">
             Theme follows system preference unless changed.
             </div>
@@ -73,12 +108,12 @@ export default function Settings() {
                 Ghost Mode
             </span>
             <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
-                ON
+                Planned
             </span>
             </div>
 
             <div className="mt-1 text-xs text-slate-600 dark:text-green-300/70">
-            Your location and identity are never exposed.
+            Ghost mode controls are reserved for the future map rollout.
             </div>
 
             <div className="mt-4 flex items-center justify-between">
@@ -86,12 +121,12 @@ export default function Settings() {
                 Region Visibility
             </span>
             <span className="font-mono text-sm text-slate-600 dark:text-green-300/70">
-                Manual
+                Planned
             </span>
             </div>
 
             <div className="mt-1 text-xs text-slate-600 dark:text-green-300/70">
-            Only coarse regions are shared. No GPS history is stored.
+            Region visibility controls will be enabled once map features are live.
             </div>
         </div>
 
