@@ -20,6 +20,8 @@ type LinkCard = {
   note?: string;
 };
 
+const EXPIRED_RETENTION_MS = 24 * 60 * 60 * 1000;
+
 const card =
   "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur";
 
@@ -39,12 +41,31 @@ function fmtUntil(iso: string) {
 }
 
 function normalizeCode(raw: string) {
-  const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
-  return clean;
+  return raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+}
+
+function getEffectiveStatus(card: LinkCard, nowMs: number): LinkStatus {
+  if (card.status === "active" && Date.parse(card.expiresAtISO) <= nowMs) {
+    return "expired";
+  }
+  return card.status;
+}
+
+function shouldPurge(card: LinkCard, nowMs: number): boolean {
+  if (getEffectiveStatus(card, nowMs) !== "expired") return false;
+  const expiresAtMs = Date.parse(card.expiresAtISO);
+  if (Number.isNaN(expiresAtMs)) return false;
+  return nowMs - expiresAtMs > EXPIRED_RETENTION_MS;
+}
+
+function getExpiryLabel(card: LinkCard, nowMs: number): string {
+  if (getEffectiveStatus(card, nowMs) === "expired") return "expired";
+  return `expires in ${fmtUntil(card.expiresAtISO)}`;
 }
 
 export default function LinkCards() {
   const [cards, setCards] = useState<LinkCard[]>([]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [note, setNote] = useState("");
   const [enterCode, setEnterCode] = useState("");
   const [enterState, setEnterState] =
@@ -75,9 +96,28 @@ export default function LinkCards() {
       });
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 60000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setCards((prev) => {
+      const filtered = prev.filter((card) => !shouldPurge(card, nowMs));
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [nowMs]);
+
+  const visibleCards = useMemo(
+    () => cards.filter((card) => !shouldPurge(card, nowMs)),
+    [cards, nowMs]
+  );
+
   const activeCount = useMemo(
-    () => cards.filter((c) => c.status === "active").length,
-    [cards]
+    () => visibleCards.filter((c) => getEffectiveStatus(c, nowMs) === "active").length,
+    [visibleCards, nowMs]
   );
 
   /** Create new card */
@@ -182,19 +222,21 @@ export default function LinkCards() {
 
       {/* Cards List */}
       <div className="space-y-3">
-        {cards.map((c) => (
-          <div key={c.id} className={`${card} p-4`}>
-            <div className="flex justify-between">
-              <div>
-                <div className="font-mono">{c.code}</div>
-                <div className="text-xs opacity-70">
-                  expires in {fmtUntil(c.expiresAtISO)}
+        {visibleCards.map((c) => {
+          return (
+            <div key={c.id} className={`${card} p-4`}>
+              <div className="flex justify-between">
+                <div>
+                  <div className="font-mono">{c.code}</div>
+                  <div className="text-xs opacity-70">
+                    {getExpiryLabel(c, nowMs)}
+                  </div>
                 </div>
+                <CopyButton text={c.code} />
               </div>
-              <CopyButton text={c.code} />
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
