@@ -108,6 +108,7 @@ export default function Profile() {
   const [bioInput, setBioInput] = useState("");
   const [isRegionPublic, setIsRegionPublic] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
   const [usernameFeedback, setUsernameFeedback] = useState<UsernameCheckResult | null>(null);
 
   const [comments, setComments] = useState<Record<string, ApiComment[]>>({});
@@ -220,7 +221,10 @@ export default function Profile() {
       setMyProfile(updated);
       setMyUsername(updated.username);
       setSuffixInput(updated.username_suffix || normalized);
+      setBioInput(updated.bio || "");
+      setIsRegionPublic(!!updated.is_region_public);
       setUsernameFeedback({ available: true, message: "✔ Username available" });
+      setShowEditProfile(false);
     } catch (e) {
       if (e instanceof TypeError && e.message.includes("Failed to fetch")) {
         setError("Unable to reach server. Please ensure backend is running and CORS allows PATCH requests.");
@@ -230,6 +234,24 @@ export default function Profile() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function onOpenEditProfile() {
+    if (!myProfile) return;
+    setSuffixInput(myProfile.username_suffix || "");
+    setBioInput(myProfile.bio || "");
+    setIsRegionPublic(!!myProfile.is_region_public);
+    setShowEditProfile(true);
+  }
+
+  function onCancelEditProfile() {
+    if (myProfile) {
+      setSuffixInput(myProfile.username_suffix || "");
+      setBioInput(myProfile.bio || "");
+      setIsRegionPublic(!!myProfile.is_region_public);
+    }
+    setUsernameFeedback(null);
+    setShowEditProfile(false);
   }
 
   function openReportProfileModal() {
@@ -476,43 +498,53 @@ export default function Profile() {
 
       {isOwnProfile && myProfile && (
         <section className={shell}>
-          <h2 className="text-sm font-mono uppercase tracking-wide text-emerald-700 dark:text-green-300">Edit Profile</h2>
-          <div className="mt-3 space-y-3">
-            <div>
-              <label className="mb-1 block text-xs font-mono text-slate-700 dark:text-green-300/80">Username</label>
-              <div className="flex items-center gap-2 rounded-lg border border-emerald-500/25 px-3 py-2">
-                <span className="font-mono text-sm text-slate-700 dark:text-green-300/80">ghost_</span>
-                <input value={suffixInput} onChange={(e) => setSuffixInput(e.target.value)} className="w-full bg-transparent font-mono text-sm text-slate-900 outline-none dark:text-green-100" placeholder="suffix" />
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-mono uppercase tracking-wide text-emerald-700 dark:text-green-300">Edit Profile</h2>
+            {!showEditProfile ? (
+              <button
+                onClick={onOpenEditProfile}
+                className="rounded-lg border border-emerald-500/30 px-3 py-2 text-xs font-mono text-slate-900 hover:bg-emerald-500/10 dark:text-green-100"
+              >
+                Edit
+              </button>
+            ) : (
+              <button
+                onClick={onCancelEditProfile}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-mono text-slate-700 hover:bg-slate-100 dark:border-green-500/20 dark:text-green-300 dark:hover:bg-green-500/10"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+
+          {showEditProfile ? (
+            <div className="mt-3 space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-mono text-slate-700 dark:text-green-300/80">Username</label>
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-500/25 px-3 py-2">
+                  <span className="font-mono text-sm text-slate-700 dark:text-green-300/80">ghost_</span>
+                  <input value={suffixInput} onChange={(e) => setSuffixInput(e.target.value)} className="w-full bg-transparent font-mono text-sm text-slate-900 outline-none dark:text-green-100" placeholder="suffix" />
+                </div>
+                {usernameFeedback && <p className={`mt-1 text-xs font-mono ${usernameFeedback.available ? "text-emerald-700 dark:text-green-300" : "text-red-600 dark:text-red-300"}`}>{usernameFeedback.message}</p>}
               </div>
-              {usernameFeedback && <p className={`mt-1 text-xs font-mono ${usernameFeedback.available ? "text-emerald-700 dark:text-green-300" : "text-red-600 dark:text-red-300"}`}>{usernameFeedback.message}</p>}
+
+              <div>
+                <label className="mb-1 block text-xs font-mono text-slate-700 dark:text-green-300/80">Bio</label>
+                <textarea value={bioInput} onChange={(e) => setBioInput(e.target.value)} rows={3} maxLength={240} className="w-full rounded-lg border border-emerald-500/25 bg-transparent p-2 text-sm text-slate-900 outline-none dark:text-green-100" />
+              </div>
+
+              <label className="flex items-center gap-2 text-sm text-slate-800 dark:text-green-200">
+                <input type="checkbox" checked={isRegionPublic} onChange={(e) => setIsRegionPublic(e.target.checked)} />
+                Make region visible to other users
+              </label>
+
+              <button onClick={onSaveProfile} disabled={saving} className="rounded-lg border border-emerald-500/30 px-3 py-2 text-sm font-mono text-slate-900 hover:bg-emerald-500/10 disabled:opacity-60 dark:text-green-100">
+                {saving ? "Saving..." : "Save Profile"}
+              </button>
             </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-mono text-slate-700 dark:text-green-300/80">Bio</label>
-              <textarea value={bioInput} onChange={(e) => setBioInput(e.target.value)} rows={3} maxLength={240} className="w-full rounded-lg border border-emerald-500/25 bg-transparent p-2 text-sm text-slate-900 outline-none dark:text-green-100" />
-            </div>
-
-            <label className="flex items-center gap-2 text-sm text-slate-800 dark:text-green-200">
-              <input type="checkbox" checked={isRegionPublic} onChange={(e) => setIsRegionPublic(e.target.checked)} />
-              Make region visible to other users
-            </label>
-
-            <button onClick={onSaveProfile} disabled={saving} className="rounded-lg border border-emerald-500/30 px-3 py-2 text-sm font-mono text-slate-900 hover:bg-emerald-500/10 disabled:opacity-60 dark:text-green-100">
-              {saving ? "Saving..." : "Save Profile"}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {isOwnProfile && myProfile && (
-        <section className={shell}>
-          <h2 className="text-sm font-mono uppercase tracking-wide text-emerald-700 dark:text-green-300">Security / Device</h2>
-          <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-            <div className="font-mono text-slate-800 dark:text-green-200">Primary Device Active: {myProfile.primary_device_active ? "Yes" : "No"}</div>
-            <div className="font-mono text-slate-800 dark:text-green-200">Session Status: {myProfile.session_status}</div>
-            <div className="font-mono text-slate-800 dark:text-green-200">Last Active: {formatDate(myProfile.last_active_at)}</div>
-            <div className="font-mono text-slate-800 dark:text-green-200">Recovery Key Generated: {myProfile.recovery_key_generated ? "Yes" : "No"}</div>
-          </div>
+          ) : (
+            <p className="mt-2 text-sm text-slate-700 dark:text-green-300/80">Click Edit to change username or bio.</p>
+          )}
         </section>
       )}
 

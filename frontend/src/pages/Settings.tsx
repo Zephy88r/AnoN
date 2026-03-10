@@ -3,9 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { getAnonDeviceKey } from "../services/geo";
 import { logout, getMyUsername, onSessionIdentityUpdated } from "../services/session";
+import { getMyProfile, type ProfileMe } from "../services/profileApi";
 
 const card =
     "rounded-2xl border border-emerald-500/15 dark:border-green-500/20 bg-white/70 dark:bg-black/50 backdrop-blur p-4";
+
+function formatDate(iso?: string) {
+    if (!iso) return "-";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+}
 
 export default function Settings() {
     const { themeMode, setThemeMode, resolvedTheme } = useTheme();
@@ -18,11 +26,29 @@ export default function Settings() {
         .toUpperCase();
     
     const [username, setUsername] = useState(getMyUsername());
+    const [profile, setProfile] = useState<ProfileMe | null>(null);
 
     useEffect(() => {
         return onSessionIdentityUpdated(() => {
             setUsername(getMyUsername());
         });
+    }, []);
+
+    useEffect(() => {
+        let active = true;
+        getMyProfile()
+            .then((res) => {
+                if (!active) return;
+                setProfile(res);
+            })
+            .catch(() => {
+                if (!active) return;
+                setProfile(null);
+            });
+
+        return () => {
+            active = false;
+        };
     }, []);
 
     return (
@@ -131,6 +157,34 @@ export default function Settings() {
         </div>
 
         {/* ===============================
+            Security / Device
+        =============================== */}
+        <div className={card}>
+            <div className="font-mono text-xs tracking-wider uppercase text-emerald-700 dark:text-green-400 mb-3">
+            Security / Device
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+            <div>
+                <div className="text-slate-600 dark:text-green-300/70">Primary Device Active</div>
+                <div className="font-mono text-slate-900 dark:text-green-200">{profile ? (profile.primary_device_active ? "Yes" : "No") : "-"}</div>
+            </div>
+            <div>
+                <div className="text-slate-600 dark:text-green-300/70">Session Status</div>
+                <div className="font-mono text-slate-900 dark:text-green-200">{profile?.session_status || "-"}</div>
+            </div>
+            <div>
+                <div className="text-slate-600 dark:text-green-300/70">Last Active</div>
+                <div className="font-mono text-slate-900 dark:text-green-200">{formatDate(profile?.last_active_at)}</div>
+            </div>
+            <div>
+                <div className="text-slate-600 dark:text-green-300/70">Recovery Key Generated</div>
+                <div className="font-mono text-slate-900 dark:text-green-200">{profile ? (profile.recovery_key_generated ? "Yes" : "No") : "-"}</div>
+            </div>
+            </div>
+        </div>
+
+        {/* ===============================
             Identity
         =============================== */}
         <div className={card}>
@@ -166,15 +220,15 @@ export default function Settings() {
 
             <div className="mt-4 flex items-center justify-between">
             <span className="text-slate-800 dark:text-green-200">
-                Recovery Keys
+                Username Changed
             </span>
             <span className="font-mono text-sm text-emerald-700 dark:text-green-300">
-                Generated
+                {formatDate(profile?.username_changed_at)}
             </span>
             </div>
 
             <div className="mt-1 text-xs text-slate-600 dark:text-green-300/70">
-            Used to restore access on a new device (later).
+            Last time your username was updated.
             </div>
 
             <div className="mt-6">
